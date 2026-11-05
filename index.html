@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>球局小幫手</title>
+  <meta name="description" content="貼上 LINE 接龍，自動排出單打、雙打賽程與記分" />
+  <meta name="theme-color" content="#0f766e" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon-180.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-btn" data-action="home" aria-label="回首頁" id="backBtn" hidden>‹</button>
+    <h1 id="topTitle">球局小幫手</h1>
+    <span class="spacer"></span>
+    <button class="icon-btn" data-action="menu" aria-label="更多" id="menuBtn" hidden>⋯</button>
+  </header>
+  <main id="app" aria-live="polite"></main>
+  <div id="sheet" class="sheet" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
