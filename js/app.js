@@ -1,4 +1,4 @@
-import { parseRoster } from "./parser.js";
+import { parseRoster, defaultTitle } from "./parser.js";
 import { buildSchedule, roundsFromTime, standings } from "./scheduler.js";
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -252,13 +252,54 @@ const nameList = (ids, names) => ids.map((id) => `<span class="nm">${esc(names[i
 const MAX_SCORE = 30;
 const WHEEL_H = 48; // 每格高度，要和 CSS --wheel-h 一致
 
+const HINT_KEY = "rallymate.wheelHintSeen";
+function hintSeen() {
+  try {
+    return localStorage.getItem(HINT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function markHintSeen() {
+  if (document.body.classList.contains("wheel-learned")) return;
+  document.body.classList.add("wheel-learned");
+  try {
+    localStorage.setItem(HINT_KEY, "1");
+  } catch {}
+}
+
+const CHEVRON = (dir) =>
+  `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="${dir === "up" ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"}" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 function wheelHtml(r, mi, s, val) {
   const max = Math.max(MAX_SCORE, val);
   let items = "";
   for (let i = 0; i <= max; i++) items += `<div class="wheel-item${i === val ? " sel" : ""}" data-v="${i}">${i}</div>`;
-  return `<div class="wheel-wrap"><div class="wheel" data-wheel data-r="${r}" data-m="${mi}" data-s="${s}" data-val="${val}"
-    role="slider" tabindex="0" aria-label="${s === "a" ? "左隊" : "右隊"}比分，上下滑動調整" aria-valuemin="0" aria-valuemax="${max}" aria-valuenow="${val}">
-    <div class="wheel-pad"></div>${items}<div class="wheel-pad"></div></div></div>`;
+  return `<div class="wheel-wrap">
+    <button type="button" class="wheel-arrow up" data-wheel-step="-1" tabindex="-1" aria-label="少一分">${CHEVRON("up")}</button>
+    <div class="wheel-drum">
+      <div class="wheel" data-wheel data-r="${r}" data-m="${mi}" data-s="${s}" data-val="${val}"
+        role="slider" tabindex="0" aria-label="${s === "a" ? "左隊" : "右隊"}比分，上下滑動調整" aria-valuemin="0" aria-valuemax="${max}" aria-valuenow="${val}">
+        <div class="wheel-pad"></div>${items}<div class="wheel-pad"></div>
+      </div>
+    </div>
+    <button type="button" class="wheel-arrow down" data-wheel-step="1" tabindex="-1" aria-label="多一分">${CHEVRON("down")}</button>
+    <div class="wheel-hint" aria-hidden="true"><span class="hand">👆</span>上下滑</div>
+  </div>`;
+}
+
+// 滾筒立體感：離中間越遠的數字越往後翻、越小、越淡
+function paintWheel(w) {
+  const top = w.scrollTop;
+  const items = w.querySelectorAll(".wheel-item");
+  const from = Math.max(0, Math.floor(top / WHEEL_H) - 2);
+  const to = Math.min(items.length - 1, Math.ceil(top / WHEEL_H) + 2);
+  for (let i = from; i <= to; i++) {
+    const off = (i * WHEEL_H - top) / WHEEL_H; // 0 = 正中間
+    const a = Math.min(1, Math.abs(off));
+    items[i].style.transform = `perspective(240px) rotateX(${-off * 32}deg) scale(${1 - a * 0.28})`;
+    items[i].style.opacity = String(1 - a * 0.62);
+  }
 }
 
 function wheelIndex(w) {
@@ -287,6 +328,7 @@ function commitWheel(w) {
   w.dataset.val = v;
   w.setAttribute("aria-valuenow", v);
   saveEvents();
+  markHintSeen();
 }
 
 // 送出任何動作前，先把還在滑動中的滾輪數值存起來
@@ -298,10 +340,17 @@ function initWheels() {
   document.querySelectorAll("[data-wheel]").forEach((w) => {
     w.scrollTop = Number(w.dataset.val) * WHEEL_H;
     markWheel(w, Number(w.dataset.val));
+    paintWheel(w);
     let timer;
+    let raf = 0;
     w.addEventListener(
       "scroll",
       () => {
+        if (!raf)
+          raf = requestAnimationFrame(() => {
+            raf = 0;
+            paintWheel(w);
+          });
         markWheel(w, wheelIndex(w));
         clearTimeout(timer);
         timer = setTimeout(() => commitWheel(w), 150);
@@ -588,7 +637,7 @@ async function decodeShare(code) {
 
 // ---------- 動作 ----------
 function newDraft() {
-  return { text: "", title: "", time: null, players: [], mode: "doubles", courts: 1, minutes: 120, perGame: 15, start: "", rounds: 8, roundsTouched: false };
+  return { text: "", title: defaultTitle(null), time: null, players: [], mode: "doubles", courts: 1, minutes: 120, perGame: 15, start: "", rounds: 8, roundsTouched: false };
 }
 
 function applyParse(text) {
@@ -603,7 +652,7 @@ function applyParse(text) {
     return old ? { ...old, arrive: p.arrive, notes: p.notes } : { ...p, id: uid(), srcName: p.name };
   });
   for (const m of manual) if (!d.players.some((p) => p.name === m.name)) d.players.push(m);
-  if (r.title && !d.titleTouched) d.title = r.title;
+  if (!d.titleTouched) d.title = defaultTitle(r.date);
   d.time = r.time;
   if (r.time) {
     d.minutes = r.time.minutes;
@@ -634,7 +683,7 @@ function createEvent() {
   const now = new Date();
   const ev = {
     id: uid(),
-    title: d.title.trim() || `${now.getMonth() + 1}/${now.getDate()} 球局`,
+    title: d.title.trim() || defaultTitle(null),
     date: `${now.getFullYear()}/${now.getMonth() + 1}/${now.getDate()}`,
     createdAt: Date.now(),
     mode: d.mode,
@@ -884,6 +933,13 @@ document.addEventListener("click", (e) => {
     item.parentElement.scrollTo({ top: Number(item.dataset.v) * WHEEL_H, behavior: "smooth" });
     return;
   }
+  // 滾筒上下的箭頭：轉一格
+  const step = e.target.closest("[data-wheel-step]");
+  if (step) {
+    const w = step.parentElement.querySelector("[data-wheel]");
+    w.scrollTo({ top: (wheelIndex(w) + Number(step.dataset.wheelStep)) * WHEEL_H, behavior: "smooth" });
+    return;
+  }
   const el = e.target.closest("[data-action]");
   if (!el || el.disabled) return;
   if (el.dataset.action === "close-sheet") {
@@ -980,6 +1036,7 @@ document.addEventListener("visibilitychange", updateWakeLock);
 
 // ---------- 啟動 ----------
 async function boot() {
+  if (hintSeen()) document.body.classList.add("wheel-learned");
   const m = location.hash.match(/^#s=(.+)$/);
   if (m) {
     try {

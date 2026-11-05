@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseRoster } from "../js/parser.js";
+import { parseRoster, parseDate, defaultTitle } from "../js/parser.js";
 
 test("接龍格式一：有空位與滿額", () => {
   const r = parseRoster(`📆11/5（四）
@@ -52,6 +52,17 @@ test("候補、+1、括號註記、重複名字", () => {
   assert.deepEqual(r.players[2].notes, ["晚到"]);
   assert.equal(r.players[3].waitlist, true);
   assert.equal(r.players[3].active, false);
+});
+
+test("日期解析與預設球局名稱", () => {
+  const now = new Date(2026, 10, 5); // 2026/11/5（四）
+  assert.deepEqual(parseDate("📆11/5（四）\n⏰15:30-17:30", now), { year: 2026, month: 11, day: 5, weekday: "四" });
+  assert.deepEqual(parseDate("時間：11/5（週四）1600-1800", now)?.weekday, "四");
+  assert.equal(parseDate("1/3 新年場", new Date(2026, 11, 20)).year, 2027); // 12 月看到 1/3 → 明年
+  assert.equal(parseDate("沒有日期\n1.阿明", now), null);
+  assert.equal(parseDate("2/30", now), null);
+  assert.equal(defaultTitle(parseDate("11/5", now)), "11/5（四）球敘");
+  assert.equal(defaultTitle(null, now), "11/5（四）球敘");
 });
 
 test("全形數字", () => {

@@ -1,5 +1,5 @@
 // 離線快取：先回快取、背景更新（stale-while-revalidate）
-const CACHE = "rallymate-v4";
+const CACHE = "rallymate-v5";
 const SHELL = [
   "./",
   "index.html",

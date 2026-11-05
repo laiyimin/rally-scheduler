@@ -175,29 +175,57 @@ input[type="text"], input[type="number"], input[type="time"] {
 .scorebox .num { font-size: 32px; font-weight: 800; min-width: 38px; text-align: center; font-variant-numeric: tabular-nums; }
 .team.a .num { color: var(--a); }
 .team.b .num { color: var(--b); }
-/* 滾輪記分：上下滑動，中間那格就是分數 */
-.wheel-wrap { position: relative; margin-top: 8px; --wheel-h: 48px; }
-.wheel-wrap::before {
-  content: ""; position: absolute; left: 6px; right: 6px; top: var(--wheel-h); height: var(--wheel-h);
-  border-radius: 12px; background: var(--card); box-shadow: var(--shadow); pointer-events: none;
+/* 滾輪記分：做成看得出是「滾筒」的樣子
+   - 圓筒明暗（上下暗、中間亮）＋ 數字隨位置翻轉縮小（JS paintWheel）
+   - 中間有框線標出目前分數，上下箭頭提示可以轉，第一次使用有「上下滑」提示 */
+.wheel-wrap { position: relative; margin-top: 6px; --wheel-h: 48px; display: flex; flex-direction: column; align-items: stretch; }
+.wheel-arrow {
+  border: 0; background: transparent; color: var(--muted); height: 26px; padding: 0;
+  display: grid; place-items: center; opacity: 0.85;
 }
+.wheel-arrow:active { color: var(--text); }
+.wheel-drum {
+  position: relative; border-radius: 14px; overflow: hidden;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line), inset 0 10px 14px -10px rgb(0 0 0 / 0.35), inset 0 -10px 14px -10px rgb(0 0 0 / 0.35);
+}
+/* 圓筒明暗 */
+.wheel-drum::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(rgb(0 0 0 / 0.28), transparent 34%, transparent 66%, rgb(0 0 0 / 0.28));
+}
+/* 中間那格：目前分數 */
+.wheel-drum::before {
+  content: ""; position: absolute; left: 0; right: 0; top: var(--wheel-h); height: var(--wheel-h); pointer-events: none;
+  border-top: 2px solid currentColor; border-bottom: 2px solid currentColor; opacity: 0.35;
+}
+.team.a .wheel-drum { color: var(--a); }
+.team.b .wheel-drum { color: var(--b); }
 .wheel {
   position: relative; height: calc(var(--wheel-h) * 3); overflow-y: auto; overscroll-behavior: contain;
-  scroll-snap-type: y mandatory; scrollbar-width: none; touch-action: pan-y; outline: none;
-  -webkit-mask-image: linear-gradient(transparent, #000 30%, #000 70%, transparent);
-          mask-image: linear-gradient(transparent, #000 30%, #000 70%, transparent);
+  scroll-snap-type: y mandatory; scrollbar-width: none; touch-action: pan-y; outline: none; color: var(--text);
 }
 .wheel::-webkit-scrollbar { display: none; }
-.wheel:focus-visible { box-shadow: 0 0 0 2px var(--brand); border-radius: 12px; }
+.wheel:focus-visible { box-shadow: inset 0 0 0 2px var(--brand); }
 .wheel-pad { height: var(--wheel-h); }
 .wheel-item {
   height: var(--wheel-h); display: grid; place-items: center; scroll-snap-align: center;
-  font-size: 22px; font-weight: 700; opacity: 0.4; font-variant-numeric: tabular-nums; cursor: pointer;
-  transition: font-size 0.12s, opacity 0.12s;
+  font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; cursor: pointer;
+  transform-origin: center; will-change: transform;
 }
-.wheel-item.sel { font-size: 36px; font-weight: 800; opacity: 1; }
 .team.a .wheel-item.sel { color: var(--a); }
 .team.b .wheel-item.sel { color: var(--b); }
+/* 第一次使用的提示，滑過一次就不再出現 */
+.wheel-hint {
+  position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%);
+  background: var(--text); color: var(--bg); font-size: 13px; font-weight: 700; white-space: nowrap;
+  padding: 3px 10px 3px 6px; border-radius: 999px; pointer-events: none; display: flex; align-items: center; gap: 2px;
+  box-shadow: var(--shadow);
+}
+.wheel-hint .hand { display: inline-block; animation: wheel-swipe 1.4s ease-in-out infinite; }
+@keyframes wheel-swipe { 0%, 100% { transform: translateY(4px); } 50% { transform: translateY(-5px); } }
+.wheel-learned .wheel-hint { display: none; }
+@media (prefers-reduced-motion: reduce) { .wheel-hint .hand { animation: none; } }
 .rest-line { margin-top: 10px; font-size: 15px; color: var(--muted); line-height: 1.6; }
 .nm { font-size: 21px; font-weight: 700; color: var(--text); }
 .done-badge { font-size: 12px; font-weight: 700; color: var(--brand); background: var(--brand-soft); padding: 2px 8px; border-radius: 999px; }

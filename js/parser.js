@@ -56,6 +56,30 @@ function parseTimeRange(text) {
   return { start: fmt(start), end: fmt(end), minutes: end - start };
 }
 
+const WEEKDAYS = "日一二三四五六";
+
+// 抓接龍裡的日期（11/5、11/5（四））；年份取最接近今天的那一年
+export function parseDate(text, now = new Date()) {
+  const m = (text || "").match(/(?<![\d/])(\d{1,2})\s*\/\s*(\d{1,2})(?![\d/])/);
+  if (!m) return null;
+  const month = Number(m[1]);
+  const day = Number(m[2]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  let year = now.getFullYear();
+  const diffMonths = (month - (now.getMonth() + 1)) ;
+  if (diffMonths < -6) year++; // 12 月看到 1/3 → 明年
+  else if (diffMonths > 6) year--; // 1 月看到 12/28 → 去年
+  const d = new Date(year, month - 1, day);
+  if (d.getMonth() !== month - 1) return null; // 2/30 之類不存在的日期
+  return { year, month, day, weekday: WEEKDAYS[d.getDay()] };
+}
+
+// 預設球局名稱：「11/5（四）球敘」；沒有日期就用今天
+export function defaultTitle(date, now = new Date()) {
+  const d = date || { month: now.getMonth() + 1, day: now.getDate(), weekday: WEEKDAYS[now.getDay()] };
+  return `${d.month}/${d.day}（${d.weekday}）球敘`;
+}
+
 function parseTitle(lines) {
   for (const line of lines) {
     const s = line.trim();
@@ -120,6 +144,7 @@ export function parseRoster(text) {
 
   return {
     title,
+    date: parseDate(src),
     time: parseTimeRange(src),
     players,
   };
