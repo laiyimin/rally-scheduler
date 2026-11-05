@@ -1,5 +1,6 @@
 import { parseRoster, defaultTitle } from "./parser.js";
 import { buildSchedule, roundsFromTime, standings } from "./scheduler.js";
+import { cloudEnabled, createCloud, joinCloud, fetchCloud, saveMatch, saveAll, watchCloud, shareUrl, parseShareHash } from "./cloud.js";
 
 const $ = (s, el = document) => el.querySelector(s);
 const app = $("#app");
@@ -36,7 +37,75 @@ const state = {
 };
 
 const current = () => state.shared || state.events.find((e) => e.id === state.eventId);
-const readonly = () => !!state.shared;
+// 唯讀：別人分享的快照，或用「觀看連結」打開的雲端球局
+const readonly = () => {
+  if (state.shared) return true;
+  const ev = state.events.find((e) => e.id === state.eventId);
+  return !!(ev?.cloud && !ev.cloud.key);
+};
+
+// ---------- 雲端同步 ----------
+let lastSyncToast = 0;
+function syncFail(e) {
+  console.warn("sync failed", e);
+  if (Date.now() - lastSyncToast < 8000) return;
+  lastSyncToast = Date.now();
+  toast(navigator.onLine ? "同步失敗，請稍後再試" : "目前離線，連上網路後會自動同步");
+}
+const pushMatch = (ev, r, mi) => ev?.cloud?.key && saveMatch(ev.cloud, Number(r), Number(mi), ev.rounds[r].matches[mi]).catch(syncFail);
+const pushAll = (ev) => ev?.cloud?.key && saveAll(ev.cloud, ev).catch(syncFail);
+
+let watching = null; // { id, off }
+let lastInteract = 0;
+document.addEventListener("pointerdown", () => (lastInteract = Date.now()), true);
+
+async function ensureWatch(ev) {
+  if (!ev?.cloud || !cloudEnabled()) return stopWatch();
+  if (watching?.id === ev.cloud.id) return;
+  stopWatch();
+  const w = { id: ev.cloud.id, off: null };
+  watching = w;
+  try {
+    const off = await watchCloud(ev.cloud.id, (data) => onRemote(ev.id, data));
+    if (watching === w) w.off = off;
+    else off();
+  } catch (e) {
+    syncFail(e);
+  }
+}
+function stopWatch() {
+  watching?.off?.();
+  watching = null;
+}
+
+const snapshotKey = (ev) => JSON.stringify([ev.title, ev.players, ev.rounds]);
+function onRemote(localId, data) {
+  const ev = state.events.find((e) => e.id === localId);
+  if (!ev || !data) return;
+  // 自己有剛滑、還沒存的分數：先送出。Firebase 會馬上再通知一次「合併後」的資料，
+  // 那一次才套用；這次的資料比較舊，套用會把自己的分數蓋回去。
+  if (flushWheels()) return;
+  const before = snapshotKey(ev);
+  Object.assign(ev, data, { id: ev.id, cloud: ev.cloud, createdAt: ev.createdAt });
+  if (snapshotKey(ev) === before) return; // 自己剛寫入的回音
+  saveEvents();
+  remoteRender();
+}
+// 別人更新時重畫；正在滑滾輪或開著選單時先等一下，避免畫面跳掉
+let remoteTimer;
+function remoteRender() {
+  clearTimeout(remoteTimer);
+  if (state.view === "home") return renderHome();
+  if (state.view !== "event") return;
+  if (Date.now() - lastInteract < 1500 || !$("#sheet").hidden || state.renaming) {
+    remoteTimer = setTimeout(remoteRender, 700);
+    return;
+  }
+  flushWheels(); // 畫面上還沒存的分數先存起來（並送出），才不會被別人的更新蓋掉
+  const y = window.scrollY;
+  renderEvent();
+  window.scrollTo(0, y);
+}
 
 // ---------- 工具 ----------
 let toastTimer;
@@ -98,6 +167,8 @@ function render() {
   else if (v === "paste") renderPaste();
   else if (v === "setup") renderSetup();
   else if (v === "event") renderEvent();
+  if (v === "event" && !state.shared) ensureWatch(current());
+  else stopWatch();
   updateWakeLock();
 }
 
@@ -114,7 +185,7 @@ function renderHome() {
               const p = progress(ev);
               const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
               return `<button class="card event-item" data-action="open" data-id="${ev.id}">
-                <div class="row between"><strong>${esc(ev.title)}</strong><span class="muted small">${esc(ev.date)}</span></div>
+                <div class="row between"><strong>${esc(ev.title)}</strong><span class="muted small">${ev.cloud ? (ev.cloud.key ? "🔗 同步 · " : "👀 觀看 · ") : ""}${esc(ev.date)}</span></div>
                 <div class="muted small">${ev.mode === "singles" ? "單打" : "雙打"}・${ev.courts} 面場・${ev.players.filter((p) => !p.left).length} 人・${p.done}/${p.total} 場</div>
                 <div class="progress"><i style="width:${pct}%"></i></div>
               </button>`;
@@ -241,7 +312,7 @@ function renderEvent() {
       <button class="${tab === "rounds" ? "on" : ""}" data-action="tab" data-v="rounds" role="tab">賽程 ${p.done}/${p.total}</button>
       <button class="${tab === "rank" ? "on" : ""}" data-action="tab" data-v="rank" role="tab">排名</button>
     </div></div>
-    ${readonly() ? `<div class="banner">這是別人分享的唯讀賽程。<button class="btn sm" data-action="import-shared" style="margin-left:6px">存到我的手機</button></div>` : ""}
+    ${state.shared ? `<div class="banner">這是別人分享的唯讀賽程。<button class="btn sm" data-action="import-shared" style="margin-left:6px">存到我的手機</button></div>` : readonly() ? `<div class="banner live">👀 觀看模式・比分會即時更新</div>` : ""}
     ${tab === "live" ? liveHtml(ev) : tab === "rounds" ? roundsHtml(ev) : rankHtml(ev)}`;
   initWheels();
 }
@@ -318,22 +389,27 @@ function markWheel(w, idx) {
 
 function commitWheel(w) {
   const ev = current();
-  if (!ev || readonly() || !w.isConnected) return;
-  const m = ev.rounds[w.dataset.r]?.matches[w.dataset.m];
-  if (!m || m.done) return;
-  const k = w.dataset.s === "a" ? "sa" : "sb";
+  // 只存「使用者真的滑過」的滾輪（停的位置和畫出來時的分數不同）；
+  // 畫面上的舊數字不能拿來蓋掉別人剛改的分數。回傳是否有送出。
+  if (!ev || readonly() || !w.isConnected) return false;
   const v = wheelIndex(w);
-  if (m[k] === v) return;
-  m[k] = v;
+  if (v === Number(w.dataset.val)) return false;
   w.dataset.val = v;
   w.setAttribute("aria-valuenow", v);
+  const m = ev.rounds[w.dataset.r]?.matches[w.dataset.m];
+  if (!m || m.done || m[w.dataset.s === "a" ? "sa" : "sb"] === v) return false;
+  m[w.dataset.s === "a" ? "sa" : "sb"] = v;
   saveEvents();
+  pushMatch(ev, w.dataset.r, w.dataset.m);
   markHintSeen();
+  return true;
 }
 
-// 送出任何動作前，先把還在滑動中的滾輪數值存起來
+// 送出任何動作前，先把還在滑動中的滾輪數值存起來；回傳送出了幾個
 function flushWheels() {
-  document.querySelectorAll("[data-wheel]").forEach(commitWheel);
+  let n = 0;
+  document.querySelectorAll("[data-wheel]").forEach((w) => commitWheel(w) && n++);
+  return n;
 }
 
 function initWheels() {
@@ -346,6 +422,7 @@ function initWheels() {
     w.addEventListener(
       "scroll",
       () => {
+        if (wheelIndex(w) !== Number(w.dataset.val)) lastInteract = Date.now();
         if (!raf)
           raf = requestAnimationFrame(() => {
             raf = 0;
@@ -409,7 +486,7 @@ function liveHtml(ev) {
   const round = ev.rounds[ri];
   const next = ev.rounds[ri + 1];
   return `
-    <p class="muted small" style="margin:0 0 8px">第 ${ri + 1} / ${ev.rounds.length} 輪</p>
+    <p class="muted small" style="margin:0 0 8px">第 ${ri + 1} / ${ev.rounds.length} 輪${ev.cloud ? "・🔗 即時同步中" : ""}</p>
     <div class="courts">${round.matches.map((m, mi) => `<div class="card">${scoreControls(ev, ri, mi, m, true)}</div>`).join("")}</div>
     ${
       round.rest.length || round.absent?.length
@@ -499,6 +576,15 @@ function closeSheet() {
 }
 
 function eventMenu() {
+  const ev = current();
+  if (readonly() && !state.shared) {
+    openSheet(`<h3>${esc(ev.title)}</h3>
+      <button class="menu-item" data-action="share-view"><span class="ico">👀</span>分享觀看連結</button>
+      <button class="menu-item" data-action="copy-text"><span class="ico">💬</span>複製賽程文字</button>
+      <button class="menu-item" data-action="delete-event" style="color:var(--b)"><span class="ico">🗑</span>從這支手機移除</button>
+      <button class="menu-item" data-action="close-sheet"><span class="ico">✕</span>關閉</button>`);
+    return;
+  }
   if (readonly()) {
     openSheet(`<h3>分享的賽程</h3>
       <button class="menu-item" data-action="import-shared"><span class="ico">💾</span>存到我的手機（可以記分）</button>
@@ -507,7 +593,10 @@ function eventMenu() {
   }
   openSheet(`<h3>${esc(current().title)}</h3>
     <button class="menu-item" data-action="copy-text"><span class="ico">💬</span>複製賽程文字（貼到 LINE 群組）</button>
-    <button class="menu-item" data-action="share-link"><span class="ico">🔗</span>分享唯讀連結</button>
+    ${cloudEnabled()
+      ? `<button class="menu-item" data-action="share-edit"><span class="ico">✏️</span><span>分享「記分」連結<br><span class="muted small">拿到的人可以一起改比分</span></span></button>
+    <button class="menu-item" data-action="share-view"><span class="ico">👀</span><span>分享「觀看」連結<br><span class="muted small">貼到群組，大家即時看比分</span></span></button>`
+      : `<button class="menu-item" data-action="share-link"><span class="ico">🔗</span>分享唯讀連結</button>`}
     <button class="menu-item" data-action="edit-players"><span class="ico">👥</span>有人加入/離開 → 重排剩下的賽程</button>
     <button class="menu-item" data-action="reshuffle"><span class="ico">🔀</span>重新洗牌（未開打的輪次）</button>
     <button class="menu-item danger" data-action="delete-event" style="color:var(--b)"><span class="ico">🗑</span>刪除這個球局</button>
@@ -588,6 +677,18 @@ async function copy(text) {
     ta.remove();
     return ok;
   }
+}
+
+async function shareOrCopy(text, url, copiedMsg) {
+  if (navigator.share) {
+    try {
+      await navigator.share({ text, url });
+      return;
+    } catch (e) {
+      if (e.name === "AbortError") return;
+    }
+  }
+  (await copy(`${text}\n${url}`)) ? toast(copiedMsg) : toast("複製失敗");
 }
 
 function b64url(bytes) {
@@ -695,6 +796,17 @@ function createEvent() {
   };
   state.events.push(ev);
   saveEvents();
+  if (cloudEnabled())
+    createCloud(ev)
+      .then((cloud) => {
+        ev.cloud = cloud;
+        saveEvents();
+        if (state.view === "event" && state.eventId === ev.id) {
+          ensureWatch(ev);
+          renderEvent();
+        }
+      })
+      .catch((e) => console.warn("upload later", e)); // 失敗沒關係，分享時會再上傳
   state.draft = null;
   state.eventId = ev.id;
   state.view = "event";
@@ -813,6 +925,7 @@ async function onAction(el) {
       if (m.sa === m.sb && !confirm(m.sa === 0 ? "還沒記分，確定這場打完了？" : "比分相同，確定這場打完了？")) return;
       m.done = true;
       saveEvents();
+      pushMatch(ev, el.dataset.r, el.dataset.m);
       const round = ev.rounds[el.dataset.r];
       if (state.tab === "live" && round.matches.every((x) => x.done)) toast(`第 ${Number(el.dataset.r) + 1} 輪結束，換下一輪`);
       renderEvent();
@@ -821,6 +934,7 @@ async function onAction(el) {
     case "reopen":
       ev.rounds[el.dataset.r].matches[el.dataset.m].done = false;
       saveEvents();
+      pushMatch(ev, el.dataset.r, el.dataset.m);
       if (state.tab === "rounds") state.editing = { r: Number(el.dataset.r), m: Number(el.dataset.m) };
       renderEvent();
       break;
@@ -845,15 +959,31 @@ async function onAction(el) {
     case "share-link": {
       closeSheet();
       const url = `${location.origin}${location.pathname}#s=${await encodeShare(ev)}`;
-      if (navigator.share) {
+      await shareOrCopy(`${ev.title} 賽程`, url, "連結已複製（比分是此刻的快照）");
+      break;
+    }
+    case "share-edit":
+    case "share-view": {
+      closeSheet();
+      if (!ev.cloud) {
+        toast("上傳中…");
         try {
-          await navigator.share({ title: ev.title, text: `${ev.title} 賽程`, url });
-          break;
+          ev.cloud = await createCloud(ev);
+          saveEvents();
+          ensureWatch(ev);
         } catch (e) {
-          if (e.name === "AbortError") break;
+          console.warn(e);
+          return toast("上傳失敗，請確認網路後再試");
         }
       }
-      (await copy(url)) ? toast("連結已複製（比分是此刻的快照）") : toast("複製失敗");
+      const editable = a === "share-edit";
+      if (editable && !ev.cloud.key) return toast("你只有觀看權限，不能分享記分連結");
+      await shareOrCopy(
+        editable ? `🏸 ${ev.title}｜記分連結（點開可以一起改比分）` : `🏸 ${ev.title}｜即時比分`,
+        shareUrl(ev.cloud, editable),
+        editable ? "記分連結已複製，貼到 LINE 給記分的人" : "觀看連結已複製，貼到 LINE 群組"
+      );
+      renderEvent();
       break;
     }
     case "import-shared": {
@@ -890,6 +1020,7 @@ async function onAction(el) {
       reschedule(ev, remainCount);
       delete ev._backup;
       saveEvents();
+      pushAll(ev);
       closeSheet();
       toast("已重排剩下的賽程");
       renderEvent();
@@ -901,12 +1032,14 @@ async function onAction(el) {
       if (remain <= 0) return toast("沒有未開打的輪次");
       reschedule(ev, remain);
       saveEvents();
+      pushAll(ev);
       toast("已重新洗牌");
       renderEvent();
       break;
     }
     case "delete-event":
-      if (!confirm(`刪除「${ev.title}」？刪除後無法復原。`)) return;
+      if (!confirm(ev.cloud ? `從這支手機移除「${ev.title}」？\n其他人的連結仍然可以使用。` : `刪除「${ev.title}」？刪除後無法復原。`)) return;
+      if (ev.cloud) stopWatch();
       state.events = state.events.filter((e) => e.id !== ev.id);
       saveEvents();
       closeSheet();
@@ -1037,6 +1170,12 @@ document.addEventListener("visibilitychange", updateWakeLock);
 // ---------- 啟動 ----------
 async function boot() {
   if (hintSeen()) document.body.classList.add("wheel-learned");
+  const link = parseShareHash(location.hash);
+  if (link) {
+    history.replaceState(null, "", location.pathname);
+    if (!cloudEnabled()) toast("這個版本沒有開啟雲端同步");
+    else await openCloudLink(link);
+  }
   const m = location.hash.match(/^#s=(.+)$/);
   if (m) {
     try {
@@ -1052,5 +1191,32 @@ async function boot() {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
 }
+async function openCloudLink(link) {
+  app.innerHTML = `<div class="card empty"><div class="big">🏸</div><p>載入球局中…</p></div>`;
+  try {
+    let ev = state.events.find((e) => e.cloud?.id === link.id);
+    if (!ev) {
+      if (link.key) await joinCloud(link);
+      const data = await fetchCloud(link.id);
+      if (!data) throw new Error("not found");
+      ev = { ...data, id: uid(), cloud: { id: link.id, key: link.key } };
+      state.events.push(ev);
+      saveEvents();
+      toast(link.key ? "已加入，可以一起記分" : "觀看模式，比分會即時更新");
+    } else if (link.key && !ev.cloud.key) {
+      await joinCloud(link); // 原本只能看，現在拿到記分連結
+      ev.cloud.key = link.key;
+      saveEvents();
+      toast("已升級成可以記分");
+    }
+    state.eventId = ev.id;
+    state.view = "event";
+    state.tab = "live";
+  } catch (e) {
+    console.warn(e);
+    toast(navigator.onLine ? "找不到這個球局，或連結有誤" : "目前離線，連上網路後再打開連結");
+  }
+}
+
 window.addEventListener("hashchange", () => location.reload());
 boot();

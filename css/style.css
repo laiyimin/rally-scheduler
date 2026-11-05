@@ -269,3 +269,4 @@ td.name { text-align: left; font-weight: 700; font-size: 24px; }
 @media (min-width: 560px) {
   .team .names { font-size: 27px; }
 }
+.banner.live { background: var(--brand-soft); color: var(--brand); }

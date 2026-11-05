@@ -1,0 +1,31 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "events": {
+      "$id": {
+        ".read": true,
+        ".write": "auth != null && root.child('editors').child($id).child(auth.uid).exists()",
+        ".validate": "$id.length >= 10 && $id.length <= 24"
+      }
+    },
+
+    "secrets": {
+      "$id": {
+        ".read": false,
+        ".write": "auth != null && !data.exists()",
+        "editKey": { ".validate": "newData.isString() && newData.val().length >= 16" }
+      }
+    },
+
+    "editors": {
+      "$id": {
+        "$uid": {
+          ".read": false,
+          ".write": "auth != null && auth.uid === $uid && newData.val() === root.child('secrets').child($id).child('editKey').val()"
+        }
+      }
+    }
+  }
+}
