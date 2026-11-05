@@ -93,6 +93,7 @@ function setTop(title, { back = false, menu = false } = {}) {
 
 function render() {
   const v = state.view;
+  app.dataset.view = v;
   if (v === "home") renderHome();
   else if (v === "paste") renderPaste();
   else if (v === "setup") renderSetup();
@@ -242,6 +243,78 @@ function renderEvent() {
     </div></div>
     ${readonly() ? `<div class="banner">這是別人分享的唯讀賽程。<button class="btn sm" data-action="import-shared" style="margin-left:6px">存到我的手機</button></div>` : ""}
     ${tab === "live" ? liveHtml(ev) : tab === "rounds" ? roundsHtml(ev) : rankHtml(ev)}`;
+  initWheels();
+}
+
+const nameList = (ids, names) => ids.map((id) => `<span class="nm">${esc(names[id] || "?")}</span>`).join("、");
+
+// ---------- 滾輪記分 ----------
+const MAX_SCORE = 30;
+const WHEEL_H = 48; // 每格高度，要和 CSS --wheel-h 一致
+
+function wheelHtml(r, mi, s, val) {
+  const max = Math.max(MAX_SCORE, val);
+  let items = "";
+  for (let i = 0; i <= max; i++) items += `<div class="wheel-item${i === val ? " sel" : ""}" data-v="${i}">${i}</div>`;
+  return `<div class="wheel-wrap"><div class="wheel" data-wheel data-r="${r}" data-m="${mi}" data-s="${s}" data-val="${val}"
+    role="slider" tabindex="0" aria-label="${s === "a" ? "左隊" : "右隊"}比分，上下滑動調整" aria-valuemin="0" aria-valuemax="${max}" aria-valuenow="${val}">
+    <div class="wheel-pad"></div>${items}<div class="wheel-pad"></div></div></div>`;
+}
+
+function wheelIndex(w) {
+  const max = w.children.length - 3;
+  return Math.max(0, Math.min(max, Math.round(w.scrollTop / WHEEL_H)));
+}
+
+function markWheel(w, idx) {
+  if (w._sel === idx) return;
+  const first = w._sel === undefined;
+  w._sel = idx;
+  w.querySelector(".wheel-item.sel")?.classList.remove("sel");
+  w.children[idx + 1]?.classList.add("sel");
+  if (!first && navigator.vibrate) navigator.vibrate(5);
+}
+
+function commitWheel(w) {
+  const ev = current();
+  if (!ev || readonly() || !w.isConnected) return;
+  const m = ev.rounds[w.dataset.r]?.matches[w.dataset.m];
+  if (!m || m.done) return;
+  const k = w.dataset.s === "a" ? "sa" : "sb";
+  const v = wheelIndex(w);
+  if (m[k] === v) return;
+  m[k] = v;
+  w.dataset.val = v;
+  w.setAttribute("aria-valuenow", v);
+  saveEvents();
+}
+
+// 送出任何動作前，先把還在滑動中的滾輪數值存起來
+function flushWheels() {
+  document.querySelectorAll("[data-wheel]").forEach(commitWheel);
+}
+
+function initWheels() {
+  document.querySelectorAll("[data-wheel]").forEach((w) => {
+    w.scrollTop = Number(w.dataset.val) * WHEEL_H;
+    markWheel(w, Number(w.dataset.val));
+    let timer;
+    w.addEventListener(
+      "scroll",
+      () => {
+        markWheel(w, wheelIndex(w));
+        clearTimeout(timer);
+        timer = setTimeout(() => commitWheel(w), 150);
+      },
+      { passive: true }
+    );
+    w.addEventListener("keydown", (e) => {
+      const d = { ArrowUp: -1, ArrowDown: 1 }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      w.scrollTo({ top: (wheelIndex(w) + d) * WHEEL_H, behavior: "smooth" });
+    });
+  });
 }
 
 function scoreControls(ev, r, mi, m, big) {
@@ -254,11 +327,7 @@ function scoreControls(ev, r, mi, m, big) {
     const val = s === "a" ? m.sa : m.sb;
     return `<div class="team ${s} ${(s === "a" ? winA : winB) ? "win" : ""}">
       <div class="names">${teamNames(ids, names)}</div>
-      <div class="scorebox">
-        ${ro || m.done ? "" : `<button class="pm minus" data-action="score" data-r="${r}" data-m="${mi}" data-s="${s}" data-d="-1" aria-label="扣一分">−</button>`}
-        <span class="num">${val}</span>
-        ${ro || m.done ? "" : `<button class="pm" data-action="score" data-r="${r}" data-m="${mi}" data-s="${s}" data-d="1" aria-label="加一分">＋</button>`}
-      </div>
+      ${ro || m.done ? `<div class="scorebox"><span class="num">${val}</span></div>` : wheelHtml(r, mi, s, val)}
     </div>`;
   };
   return `
@@ -292,11 +361,11 @@ function liveHtml(ev) {
   const next = ev.rounds[ri + 1];
   return `
     <p class="muted small" style="margin:0 0 8px">第 ${ri + 1} / ${ev.rounds.length} 輪</p>
-    ${round.matches.map((m, mi) => `<div class="card">${scoreControls(ev, ri, mi, m, true)}</div>`).join("")}
+    <div class="courts">${round.matches.map((m, mi) => `<div class="card">${scoreControls(ev, ri, mi, m, true)}</div>`).join("")}</div>
     ${
       round.rest.length || round.absent?.length
-        ? `<div class="rest-line">🪑 這輪休息：<b>${round.rest.map((id) => esc(names[id])).join("、") || "無"}</b>${
-            round.absent?.length ? `　還沒到：${round.absent.map((id) => esc(names[id])).join("、")}` : ""
+        ? `<div class="rest-line">🪑 這輪休息：${nameList(round.rest, names) || "無"}${
+            round.absent?.length ? `<br>還沒到：${nameList(round.absent, names)}` : ""
           }</div>`
         : ""
     }
@@ -306,10 +375,10 @@ function liveHtml(ev) {
             <h2>下一輪準備</h2>
             ${next.matches
               .map(
-                (m) => `<div class="mini-match"><span class="ct">場${m.court}</span><span class="t r">${esc(teamText(m.a, names))}</span><span class="s muted">vs</span><span class="t">${esc(teamText(m.b, names))}</span></div>`
+                (m) => `<div class="mini-match"><span class="ct">場${m.court}</span><span class="t r">${teamNames(m.a, names)}</span><span class="s muted">vs</span><span class="t">${teamNames(m.b, names)}</span></div>`
               )
               .join("")}
-            ${next.rest.length ? `<div class="rest-line">休息：${next.rest.map((id) => esc(names[id])).join("、")}</div>` : ""}
+            ${next.rest.length ? `<div class="rest-line">下一輪休息：${nameList(next.rest, names)}</div>` : ""}
           </div>`
         : ""
     }`;
@@ -330,13 +399,13 @@ function roundsHtml(ev) {
                   <button class="btn sm block" style="margin-top:6px" data-action="collapse">收合</button></div>`;
               return `<button class="mini-match" data-action="expand" data-r="${r}" data-m="${mi}">
                 <span class="ct">場${m.court}</span>
-                <span class="t r">${esc(teamText(m.a, names))}</span>
+                <span class="t r">${teamNames(m.a, names)}</span>
                 <span class="s">${m.done || m.sa || m.sb ? `${m.sa} : ${m.sb}` : `<span class="muted">vs</span>`}</span>
-                <span class="t">${esc(teamText(m.b, names))}</span>
+                <span class="t">${teamNames(m.b, names)}</span>
               </button>`;
             })
             .join("")}
-          ${round.rest.length ? `<div class="muted small">休：${round.rest.map((id) => esc(names[id])).join("、")}</div>` : ""}
+          ${round.rest.length ? `<div class="rest-line">休息：${nameList(round.rest, names)}</div>` : ""}
         </div>`
       )
       .join("")}
@@ -590,6 +659,7 @@ let remainCount = 0;
 
 async function onAction(el) {
   const a = el.dataset.action;
+  flushWheels();
   const ev = current();
   const d = state.draft;
   switch (a) {
@@ -807,6 +877,12 @@ document.addEventListener("click", (e) => {
       delete ev._backup;
     }
     return closeSheet();
+  }
+  // 點滾輪上的數字 → 直接滑到那個分數
+  const item = e.target.closest(".wheel-item");
+  if (item) {
+    item.parentElement.scrollTo({ top: Number(item.dataset.v) * WHEEL_H, behavior: "smooth" });
+    return;
   }
   const el = e.target.closest("[data-action]");
   if (!el || el.disabled) return;
