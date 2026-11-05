@@ -159,9 +159,11 @@ function renderPaste() {
 function chipsHtml(players) {
   if (!players.length) return `<span class="muted small">還沒抓到名字，確認每行是「1.名字」或「1 名字」的格式</span>`;
   return players
-    .map(
-      (p) => `<span class="chip ${p.active ? "" : "off"}">
-        <span data-action="rename" data-id="${p.id}">${esc(p.name)}</span>
+    .map((p) =>
+      state.renaming === p.id
+        ? `<span class="chip editing"><input class="chip-input" data-rename="${p.id}" value="${esc(p.name)}" aria-label="修改 ${esc(p.name)} 的名字" enterkeyhint="done" autocomplete="off" /></span>`
+        : `<span class="chip ${p.active ? "" : "off"}">
+        <button type="button" class="chip-name" data-action="rename" data-id="${p.id}" aria-label="修改名字：${esc(p.name)}">${esc(p.name)}</button>
         ${p.arrive ? `<span class="tag">${esc(p.arrive)} 到</span>` : ""}
         ${p.waitlist ? `<span class="tag">候補</span>` : ""}
         ${p.notes?.length ? `<span class="tag">${esc(p.notes.join("、"))}</span>` : ""}
@@ -630,12 +632,11 @@ async function onAction(el) {
       break;
     }
     case "rename": {
-      const p = d.players.find((x) => x.id === el.dataset.id);
-      const name = prompt("修改名字", p.name);
-      if (name && name.trim()) {
-        p.name = name.trim();
-        refreshParsed();
-      }
+      state.renaming = el.dataset.id;
+      refreshParsed();
+      const input = $(`[data-rename="${el.dataset.id}"]`);
+      input?.focus();
+      input?.select();
       break;
     }
     case "to-setup":
@@ -831,6 +832,35 @@ document.addEventListener("input", (e) => {
   } else if (e.target.id === "startInput") {
     d.start = e.target.value;
   }
+});
+
+// 名字原地編輯：Enter 或點別處 = 確定，Esc = 取消
+function finishRename(input, save) {
+  const id = input.dataset.rename;
+  if (state.renaming !== id) return; // 已處理過（重繪時的 blur）
+  state.renaming = null;
+  const d = state.draft;
+  const p = d?.players.find((x) => x.id === id);
+  const name = input.value.trim();
+  if (save && p && name && name !== p.name) {
+    if (d.players.some((x) => x.id !== id && x.name === name)) toast("名單裡已經有這個名字");
+    else p.name = name;
+  }
+  refreshParsed();
+}
+document.addEventListener("keydown", (e) => {
+  const input = e.target.closest?.("[data-rename]");
+  if (!input) return;
+  if (e.key === "Enter") {
+    e.preventDefault();
+    finishRename(input, true);
+  } else if (e.key === "Escape") {
+    finishRename(input, false);
+  }
+});
+document.addEventListener("focusout", (e) => {
+  const input = e.target.closest?.("[data-rename]");
+  if (input) finishRename(input, true);
 });
 
 document.addEventListener("submit", (e) => {

@@ -117,6 +117,15 @@ input[type="text"], input[type="number"], input[type="time"] {
 }
 .chip.off { background: transparent; border-color: var(--line); color: var(--muted); text-decoration: line-through; }
 .chip .tag { font-size: 12px; font-weight: 500; padding: 1px 7px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); }
+.chip-name {
+  border: 0; background: transparent; padding: 0; font: inherit; font-weight: 600; color: inherit;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 4px;
+}
+.chip.editing { padding: 0 4px; background: var(--card); border-color: var(--brand); }
+.chip-input {
+  border: 0; outline: 0; background: transparent; font-weight: 600; font-size: 16px;
+  width: 8em; min-height: 38px; padding: 0 10px;
+}
 .chip .x { border: 0; background: transparent; width: 30px; height: 30px; border-radius: 50%; color: var(--muted); font-size: 18px; }
 
 .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--bg); border-radius: 12px; padding: 4px; gap: 4px; }
