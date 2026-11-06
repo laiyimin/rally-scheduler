@@ -25,7 +25,9 @@ function chunk(type, data) {
 function draw(size, { rounded }) {
   const s = size / 512; // 依 icon.svg 的 512 座標系
   const px = Buffer.alloc(size * size * 4);
-  const teal = [15, 118, 110], white = [255, 255, 255], gold = [251, 191, 36];
+  // 與 icon.svg 相同的匹克球圖示：橘底、黃綠色球、咖啡色描邊、洞洞
+  const orange = [247, 165, 49], ball = [214, 232, 74], ink = [59, 47, 40], hole = [162, 181, 42], white = [255, 255, 255];
+  const holes = [[186, 176, 24], [292, 150, 23], [356, 230, 24], [246, 250, 25], [160, 292, 23], [320, 320, 25], [232, 364, 23]];
   const inRoundRect = (x, y, x0, y0, x1, y1, r) => {
     if (x < x0 || x > x1 || y < y0 || y > y1) return false;
     const cx = Math.min(Math.max(x, x0 + r), x1 - r);
@@ -36,15 +38,18 @@ function draw(size, { rounded }) {
     for (let i = 0; i < size; i++) {
       const x = (i + 0.5) / s, y = (j + 0.5) / s;
       let c = null, a = 255;
-      if (!rounded || inRoundRect(x, y, 0, 0, 512, 512, 112)) c = teal;
+      if (!rounded || inRoundRect(x, y, 0, 0, 512, 512, 112)) c = orange;
       else a = 0;
       if (c) {
-        const outer = inRoundRect(x, y, 105, 85, 407, 427, 20) && !inRoundRect(x, y, 127, 107, 385, 405, 2);
-        const mid = x >= 116 && x <= 396 && Math.abs(y - 256) <= 11;
-        const vert = y >= 96 && y <= 416 && Math.abs(x - 256) <= 7;
-        if (outer || mid) c = white;
-        else if (vert) c = teal.map((v, k) => Math.round(v + (white[k] - v) * 0.55));
-        if ((x - 330) ** 2 + (y - 176) ** 2 <= 34 * 34) c = gold;
+        const d = Math.hypot(x - 256, y - 256);
+        if (d <= 179) c = ink; // 描邊
+        if (d <= 157) {
+          c = ball;
+          if (holes.some(([hx, hy, r]) => Math.hypot(x - hx, y - hy) <= r)) c = hole;
+          // 左上的反光
+          const ang = Math.atan2(y - 256, x - 256);
+          if (Math.abs(d - 130) <= 9 && ang > -2.75 && ang < -1.75) c = ball.map((v, k) => Math.round(v + (white[k] - v) * 0.7));
+        }
       }
       const o = (j * size + i) * 4;
       if (c) [px[o], px[o + 1], px[o + 2]] = c;

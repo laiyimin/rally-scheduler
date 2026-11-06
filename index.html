@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>球局小幫手</title>
   <meta name="description" content="貼上 LINE 接龍，自動排出單打、雙打賽程與記分" />
-  <meta name="theme-color" content="#0f766e" />
+  <meta name="theme-color" content="#fdf6e7" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#22302a" media="(prefers-color-scheme: dark)" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Huninn&display=swap" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icon-180.png" />
@@ -15,6 +19,7 @@
 <body>
   <header class="topbar">
     <button class="icon-btn" data-action="home" aria-label="回首頁" id="backBtn" hidden>‹</button>
+    <span class="logo" aria-hidden="true"></span>
     <h1 id="topTitle">球局小幫手</h1>
     <span class="spacer"></span>
     <button class="icon-btn" data-action="menu" aria-label="更多" id="menuBtn" hidden>⋯</button>

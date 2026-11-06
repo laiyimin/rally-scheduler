@@ -1,5 +1,6 @@
 import { parseRoster, defaultTitle } from "./parser.js";
 import { buildSchedule, roundsFromTime, standings } from "./scheduler.js";
+import { BALL, RALLY, ARROW } from "./doodles.js";
 import { cloudEnabled, createCloud, joinCloud, fetchCloud, saveMatch, saveAll, watchCloud, shareUrl, parseShareHash } from "./cloud.js";
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -192,7 +193,7 @@ function renderHome() {
             })
             .join("")
         : `<div class="card empty">
-            <div class="big">🏸</div>
+            ${RALLY}
             <p><strong>還沒有球局</strong></p>
             <p class="muted small">在 LINE 長按接龍訊息 → 複製，<br>回到這裡按上面的按鈕貼上就好。</p>
           </div>`
@@ -205,9 +206,10 @@ function renderPaste() {
   const parsed = d.players.length > 0;
   app.innerHTML = `
     <div class="steps"><span class="on"></span><span></span></div>
-    <div class="card stack">
-      <h2>第一步：複製 LINE 群組裡的報名接龍，並貼入以下欄位</h2>
-      <textarea id="rosterText" placeholder="只要貼入所有接龍訊息就好了，聰明的我會幫你抓出人名&#10;&#10;📆11/5（四）&#10;⏰15:30-17:30&#10;1.倫&#10;2.小甄&#10;3.K">${esc(d.text)}</textarea>
+    <div class="card stack paste-card">
+      ${RALLY}
+      <h2><span class="hl">複製 LINE 的報名接龍</span>，貼入下面的欄位</h2>
+      <textarea id="rosterText" placeholder="貼入所有接龍訊息，我會幫你抓出人名&#10;&#10;📆11/5（四）&#10;⏰15:30-17:30&#10;1.倫&#10;2.小甄&#10;3.K">${esc(d.text)}</textarea>
       <div class="row">
         <button class="btn" data-action="paste-clip" style="flex:1">📋 從剪貼簿貼上</button>
         <button class="btn" data-action="clear-text">清除</button>
@@ -225,7 +227,7 @@ function renderPaste() {
       </form>
       ${d.time ? `<p class="muted small" style="margin:0">時間 ${d.time.start}–${d.time.end}（${d.time.minutes} 分鐘）</p>` : ""}
     </div>
-    <button class="btn primary block" data-action="to-setup" ${d.players.some((p) => p.active) ? "" : "disabled"} id="nextBtn">我貼好了</button>`;
+    <button class="btn primary block" data-action="to-setup" ${d.players.some((p) => p.active) ? "" : "disabled"} id="nextBtn">下一步 ${ARROW}</button>`;
 }
 
 function chipsHtml(players) {
@@ -254,7 +256,7 @@ function renderSetup() {
   app.innerHTML = `
     <div class="steps"><span class="on"></span><span class="on"></span></div>
     <div class="card">
-      <h2>2. 選打法</h2>
+      <h2><span class="hl">選打法</span></h2>
       <div class="field"><label>球局名稱</label><input type="text" id="titleInput" value="${esc(d.title)}" style="max-width:60%" /></div>
       <div class="field" style="display:block">
         <div class="seg" role="group" aria-label="單打或雙打">
@@ -268,7 +270,7 @@ function renderSetup() {
       </div>
       <div class="field">
         <label>開始時間</label>
-        <input type="time" id="startInput" value="${esc(d.start || "")}" style="max-width:140px" />
+        <input type="time" id="startInput" value="${esc(d.start || "")}" style="max-width:170px" />
       </div>
       <div class="field">
         <label>總時長<span class="hint">分鐘</span></label>
@@ -294,7 +296,7 @@ function renderSetup() {
           </div>`
     }
     <div style="height:14px"></div>
-    <button class="btn primary block" data-action="create" ${tooFew ? "disabled" : ""} style="min-height:56px;font-size:17px">排賽程 🏸</button>`;
+    <button class="btn primary block" data-action="create" ${tooFew ? "disabled" : ""} style="min-height:58px">開始排賽程 ${BALL}</button>`;
 }
 
 function renderEvent() {
@@ -644,7 +646,7 @@ function reschedule(ev, remain) {
 // ---------- 分享 ----------
 function scheduleText(ev) {
   const names = nameMap(ev);
-  const lines = [`🏸 ${ev.title}｜${ev.mode === "singles" ? "單打" : "雙打"}・${ev.courts} 面場`, ""];
+  const lines = [`🏓 ${ev.title}｜${ev.mode === "singles" ? "單打" : "雙打"}・${ev.courts} 面場`, ""];
   ev.rounds.forEach((round, r) => {
     lines.push(`【第 ${r + 1} 輪】`);
     for (const m of round.matches) {
@@ -979,7 +981,7 @@ async function onAction(el) {
       const editable = a === "share-edit";
       if (editable && !ev.cloud.key) return toast("你只有觀看權限，不能分享記分連結");
       await shareOrCopy(
-        editable ? `🏸 ${ev.title}｜記分連結（點開可以一起改比分）` : `🏸 ${ev.title}｜即時比分`,
+        editable ? `🏓 ${ev.title}｜記分連結（點開可以一起改比分）` : `🏓 ${ev.title}｜即時比分`,
         shareUrl(ev.cloud, editable),
         editable ? "記分連結已複製，貼到 LINE 給記分的人" : "觀看連結已複製，貼到 LINE 群組"
       );
@@ -1170,6 +1172,7 @@ document.addEventListener("visibilitychange", updateWakeLock);
 // ---------- 啟動 ----------
 async function boot() {
   if (hintSeen()) document.body.classList.add("wheel-learned");
+  $(".topbar .logo").innerHTML = BALL;
   const link = parseShareHash(location.hash);
   if (link) {
     history.replaceState(null, "", location.pathname);
@@ -1197,7 +1200,7 @@ async function boot() {
   }
 }
 async function openCloudLink(link) {
-  app.innerHTML = `<div class="card empty"><div class="big">🏸</div><p>載入球局中…</p></div>`;
+  app.innerHTML = `<div class="card empty"><div class="bounce">${BALL}</div><p>載入球局中…</p></div>`;
   try {
     let ev = state.events.find((e) => e.cloud?.id === link.id);
     if (!ev) {
