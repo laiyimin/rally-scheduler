@@ -206,8 +206,8 @@ function renderPaste() {
   app.innerHTML = `
     <div class="steps"><span class="on"></span><span></span></div>
     <div class="card stack">
-      <h2>1. 貼上 LINE 接龍</h2>
-      <textarea id="rosterText" placeholder="把接龍訊息整段貼在這裡，例如：&#10;&#10;📆11/5（四）&#10;⏰15:30-17:30&#10;1.倫&#10;2.小甄&#10;3.K">${esc(d.text)}</textarea>
+      <h2>第一步：複製 LINE 群組裡的報名接龍，並貼入以下欄位</h2>
+      <textarea id="rosterText" placeholder="只要貼入所有接龍訊息就好了，聰明的我會幫你抓出人名&#10;&#10;📆11/5（四）&#10;⏰15:30-17:30&#10;1.倫&#10;2.小甄&#10;3.K">${esc(d.text)}</textarea>
       <div class="row">
         <button class="btn" data-action="paste-clip" style="flex:1">📋 從剪貼簿貼上</button>
         <button class="btn" data-action="clear-text">清除</button>
@@ -225,7 +225,7 @@ function renderPaste() {
       </form>
       ${d.time ? `<p class="muted small" style="margin:0">時間 ${d.time.start}–${d.time.end}（${d.time.minutes} 分鐘）</p>` : ""}
     </div>
-    <button class="btn primary block" data-action="to-setup" ${d.players.some((p) => p.active) ? "" : "disabled"} id="nextBtn">下一步：選打法</button>`;
+    <button class="btn primary block" data-action="to-setup" ${d.players.some((p) => p.active) ? "" : "disabled"} id="nextBtn">我貼好了</button>`;
 }
 
 function chipsHtml(players) {
@@ -1185,6 +1185,11 @@ async function boot() {
     } catch {
       toast("分享連結壞掉了");
     }
+  }
+  // 一打開就直接進入「開新球局」（點分享連結進來的除外）
+  if (state.view === "home") {
+    state.draft = newDraft();
+    state.view = "paste";
   }
   render();
   if ("serviceWorker" in navigator && location.protocol === "https:") {
