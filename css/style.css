@@ -433,3 +433,10 @@ td.name { text-align: left; font-weight: 700; font-size: 24px; }
 @media (prefers-reduced-motion: reduce) {
   .round-banner.show { animation: none; opacity: 1; transform: translate(-50%, -50%); }
 }
+
+/* ---------- 換輪：名字從「下一輪」飛上來 ---------- */
+.pn { display: inline-block; }
+.fly {
+  position: fixed; z-index: 60; margin: 0; white-space: nowrap; pointer-events: none;
+  transform-origin: 0 0; font-weight: 700; color: var(--text); font-family: var(--font);
+}

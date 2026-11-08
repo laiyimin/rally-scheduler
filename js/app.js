@@ -98,11 +98,17 @@ function remoteRender() {
   clearTimeout(remoteTimer);
   if (state.view === "home") return renderHome();
   if (state.view !== "event") return;
-  if (Date.now() - lastInteract < 1500 || !$("#sheet").hidden || state.renaming) {
+  if (Date.now() - lastInteract < 1500 || !$("#sheet").hidden || state.renaming || state.animating) {
     remoteTimer = setTimeout(remoteRender, 700);
     return;
   }
   flushWheels(); // 畫面上還沒存的分數先存起來（並送出），才不會被別人的更新蓋掉
+  // 別人打完、換到下一輪：一樣播放「下一輪名字飛上來」
+  const ev = current();
+  if (state.tab === "live" && ev && !state.shared) {
+    const prev = lastRoundShown.get(ev.id);
+    if (prev !== undefined && prev !== -1 && currentRoundIndex(ev) === prev + 1) return advanceWithFlight(null);
+  }
   const y = window.scrollY;
   renderEvent();
   window.scrollTo(0, y);
@@ -126,7 +132,8 @@ const toMin = (hhmm) => {
 function nameMap(ev) {
   return Object.fromEntries(ev.players.map((p) => [p.id, p.name]));
 }
-const teamNames = (ids, names) => ids.map((id) => esc(names[id] || "?")).join("<br>");
+// 每個名字包成一個 span（帶球員 id），換輪動畫要靠它找到名字要飛去哪裡
+const teamNames = (ids, names) => ids.map((id) => `<span class="pn" data-pid="${esc(id)}">${esc(names[id] || "?")}</span>`).join("<br>");
 const teamText = (ids, names) => ids.map((id) => names[id] || "?").join("/");
 
 function progress(ev) {
@@ -332,12 +339,12 @@ function renderEvent() {
     ${tab === "live" ? liveHtml(ev) : tab === "rounds" ? roundsHtml(ev) : rankHtml(ev)}`;
   initWheels();
   state.justDone = null;
-  // 換到新的一輪（自己按的或別人同步過來的）→ 新比賽飛進來 + 提示
+  // 記下目前顯示第幾輪；整場打完時跳出「全部打完了」
   if (tab === "live") {
     const ri = currentRoundIndex(ev);
     const prev = lastRoundShown.get(ev.id);
     lastRoundShown.set(ev.id, ri);
-    if (prev !== undefined && prev !== -1 && (ri > prev || ri === -1)) playRoundEnter(ri, ev.rounds.length);
+    if (prev !== undefined && prev !== -1 && ri === -1) playRoundEnter(-1, ev.rounds.length);
   }
 }
 
@@ -346,10 +353,79 @@ const lastRoundShown = new Map(); // 每個球局上次在「現在」分頁顯�
 const reduceMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function playRoundLeave() {
-  if (reduceMotion()) return;
-  document.querySelectorAll(".courts, .next-card, .rest-line").forEach((el) => el.classList.add("leaving"));
-  await wait(420);
+const play = (el, frames, opts) => el.animate(frames, { fill: "forwards", ...opts }).finished;
+
+// 換輪：「下一輪」裡的名字往上飛，取代場地裡原本的名字
+// stampCard：自己按「這場打完了」的那張卡片（先蓋章）；別人同步過來的換輪沒有
+async function advanceWithFlight(stampCard) {
+  if (reduceMotion() || !$(".next-card .pn")) return renderEvent();
+  state.animating = true;
+  try {
+    // 1. 剛打完的那場先蓋章
+    if (stampCard) {
+      stampCard.querySelector(".row")?.insertAdjacentHTML("beforeend", `<span class="done-badge just">已完成</span>`);
+      stampCard.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      await wait(450);
+    }
+    // 2. 記下「下一輪」每個名字現在的位置與字級
+    const sources = [...document.querySelectorAll(".next-card .pn")].map((el) => {
+      const cs = getComputedStyle(el);
+      return { pid: el.dataset.pid, name: el.textContent, rect: el.getBoundingClientRect(), font: parseFloat(cs.fontSize), lh: cs.lineHeight, el };
+    });
+    // 3. 場地裡舊的名字、滾輪、按鈕往上淡出
+    const olds = [...document.querySelectorAll(".courts .pn, .courts .wheel-wrap, .courts .scorebox, .courts .done-badge, .courts .btn")];
+    await Promise.all(
+      olds.map((el, i) => play(el, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(-18px)" }], { duration: 220, delay: i * 12, easing: "ease-in" }))
+    );
+    // 4. 換成新的一輪（先把新名字和其他東西藏起來）
+    const y = window.scrollY;
+    renderEvent();
+    window.scrollTo(0, y);
+    const later = [...document.querySelectorAll(".courts .wheel-wrap, .courts .btn, #app > .rest-line, .next-card > :not(h2)")];
+    later.forEach((el) => (el.style.opacity = "0"));
+    // 5. 名字分身從原本的位置飛到場地裡
+    const flights = sources.map((s, i) => {
+      const target = document.querySelector(`.courts .pn[data-pid="${CSS.escape(s.pid)}"]`);
+      if (!target) return Promise.resolve();
+      target.style.visibility = "hidden";
+      const tr = target.getBoundingClientRect();
+      const sc = parseFloat(getComputedStyle(target).fontSize) / s.font;
+      const clone = document.createElement("div");
+      clone.className = "fly";
+      clone.textContent = s.name;
+      Object.assign(clone.style, { left: `${s.rect.left}px`, top: `${s.rect.top}px`, fontSize: `${s.font}px`, lineHeight: s.lh });
+      document.body.appendChild(clone);
+      const dx = tr.left - s.rect.left;
+      const dy = tr.top - s.rect.top;
+      return clone
+        .animate(
+          [
+            { transform: "translate(0,0) scale(1) rotate(0deg)" },
+            { transform: `translate(${dx * 0.5}px, ${dy * 0.55 - 26}px) scale(${(1 + sc) / 2 + 0.12}) rotate(${i % 2 ? 6 : -6}deg)`, offset: 0.55 },
+            { transform: `translate(${dx}px, ${dy}px) scale(${sc}) rotate(0deg)` },
+          ],
+          { duration: 720, delay: i * 70, easing: "cubic-bezier(.45,.05,.3,1)", fill: "forwards" }
+        )
+        .finished.then(() => {
+          target.style.visibility = "";
+          target.animate([{ transform: "scale(1.18)" }, { transform: "scale(1)" }], { duration: 260, easing: "cubic-bezier(.3,1.6,.5,1)" });
+          clone.remove();
+        });
+    });
+    await Promise.all(flights);
+    // 6. 滾輪、按鈕、休息名單、再下一輪的名單浮出來；輪次跳一下
+    $(".live-status span")?.animate([{ transform: "scale(1.3)" }, { transform: "scale(1)" }], { duration: 400 });
+    await Promise.all(
+      later.map((el, i) =>
+        play(el, [{ opacity: 0, transform: "translateY(12px)" }, { opacity: 1, transform: "none" }], { duration: 300, delay: i * 50, easing: "ease-out" }).then(() => {
+          el.style.opacity = "";
+          el.getAnimations().forEach((a) => a.cancel());
+        })
+      )
+    );
+  } finally {
+    state.animating = false;
+  }
 }
 
 function playRoundEnter(ri, total) {
@@ -972,8 +1048,11 @@ async function onAction(el) {
       saveEvents();
       pushMatch(ev, el.dataset.r, el.dataset.m);
       const round = ev.rounds[el.dataset.r];
-      if (state.tab === "live" && round.matches.every((x) => x.done)) await playRoundLeave(); // 舊的比賽先飛走
-      else state.justDone = `${el.dataset.r}-${el.dataset.m}`; // 這場蓋上「已完成」章
+      if (state.tab === "live" && round.matches.every((x) => x.done)) {
+        await advanceWithFlight(el.closest(".card")); // 整輪打完：下一輪的名字飛上來
+        break;
+      }
+      state.justDone = `${el.dataset.r}-${el.dataset.m}`; // 這場蓋上「已完成」章
       renderEvent();
       break;
     }

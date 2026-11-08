@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>換輪動畫 Demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Huninn&display=swap" />
+  <link rel="stylesheet" href="../css/style.css" />
+  <style>
+    .demo-bar {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+      margin: 0 0 14px; padding: 10px 12px; border: 2px dashed var(--b); border-radius: var(--wob); font-size: 14px;
+    }
+    .demo-bar b { color: var(--b); }
+    .demo-bar .seg { flex: 1; min-width: 150px; }
+    .demo-bar .seg button { min-height: 36px; font-size: 14px; }
+    .team .names span, .mini-match .t span { display: inline-block; }
+    /* 正在飛的名字 */
+    .fly { position: fixed; z-index: 60; margin: 0; white-space: nowrap; pointer-events: none; transform-origin: 0 0; font-weight: 700; color: var(--text); }
+    .static-score { font-size: 36px; font-weight: 700; margin-top: 8px; }
+    .team.a .static-score { color: var(--a); }
+    .team.b .static-score { color: var(--b); }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-btn" aria-label="回首頁">‹</button>
+    <span class="logo" id="logo"></span>
+    <h1>11/8（日）球敘</h1>
+    <span class="spacer"></span>
+    <button class="icon-btn" aria-label="更多">⋯</button>
+  </header>
+  <main id="app" data-view="event"></main>
+
+<script type="module">
+import { BALL } from "../js/doodles.js";
+document.getElementById("logo").innerHTML = BALL;
+
+// 示範用的固定賽程（6 人 1 面場、10 人 2 面場）
+const DATA = {
+  1: [
+    { matches: [{ a: ["鴻鈞", "Yen"], b: ["柏羽", "阿德"] }], rest: ["Evan", "民"] },
+    { matches: [{ a: ["Evan", "柏羽"], b: ["民", "鴻鈞"] }], rest: ["阿德", "Yen"] },
+    { matches: [{ a: ["阿德", "民"], b: ["Yen", "Evan"] }], rest: ["鴻鈞", "柏羽"] },
+    { matches: [{ a: ["Yen", "柏羽"], b: ["鴻鈞", "Evan"] }], rest: ["民", "阿德"] },
+    { matches: [{ a: ["民", "Yen"], b: ["阿德", "鴻鈞"] }], rest: ["柏羽", "Evan"] },
+  ],
+  2: [
+    { matches: [{ a: ["倫", "小甄"], b: ["K", "田"] }, { a: ["阿萱", "Evan"], b: ["民", "阿德"] }], rest: ["鴻鈞", "柏羽"] },
+    { matches: [{ a: ["鴻鈞", "倫"], b: ["柏羽", "阿萱"] }, { a: ["小甄", "民"], b: ["K", "Evan"] }], rest: ["田", "阿德"] },
+    { matches: [{ a: ["田", "阿德"], b: ["倫", "Evan"] }, { a: ["柏羽", "K"], b: ["鴻鈞", "小甄"] }], rest: ["阿萱", "民"] },
+    { matches: [{ a: ["阿萱", "民"], b: ["田", "鴻鈞"] }, { a: ["阿德", "小甄"], b: ["倫", "柏羽"] }], rest: ["K", "Evan"] },
+  ],
+};
+
+let courts = 1;
+let ri = 0;
+let done = [];
+let busy = false;
+const app = document.getElementById("app");
+const rounds = () => DATA[courts];
+const nameSpans = (ids) => ids.map((n) => `<span data-n="${n}">${n}</span>`).join("<br>");
+const restSpans = (ids) => ids.map((n) => `<span class="nm">${n}</span>`).join("、");
+
+function courtCard(m, mi) {
+  const fin = done[mi];
+  return `<div class="card" data-court="${mi}">
+    <div class="row between"><span class="court-label">第 ${mi + 1} 場地</span>${fin ? `<span class="done-badge just">已完成</span>` : ""}</div>
+    <div class="match">
+      <div class="team a"><div class="names">${nameSpans(m.a)}</div><div class="static-score">${fin ? 21 : 0}</div></div>
+      <span class="vs">VS</span>
+      <div class="team b"><div class="names">${nameSpans(m.b)}</div><div class="static-score">${fin ? 17 : 0}</div></div>
+    </div>
+    ${fin ? `<button class="btn sm block" style="margin-top:10px" disabled>改比分</button>` : `<button class="btn primary block" style="margin-top:10px" data-finish="${mi}">這場打完了 ✓</button>`}
+  </div>`;
+}
+
+function nextCardInner(next) {
+  if (!next) return `<h2>下一輪</h2><p class="muted">這是最後一輪了</p>`;
+  return `<h2>下一輪</h2>
+    ${next.matches
+      .map((m, mi) => `<div class="mini-match" data-next="${mi}"><span class="ct">場${mi + 1}</span><span class="t r">${nameSpans(m.a)}</span><span class="s muted">vs</span><span class="t">${nameSpans(m.b)}</span></div>`)
+      .join("")}
+    ${next.rest.length ? `<div class="rest-line">休息：${restSpans(next.rest)}</div>` : ""}`;
+}
+
+function render() {
+  const round = rounds()[ri];
+  app.innerHTML = `
+    <div class="demo-bar">
+      <b>DEMO</b>
+      <div class="seg">
+        <button class="${courts === 1 ? "on" : ""}" data-courts="1">6人 1面場</button>
+        <button class="${courts === 2 ? "on" : ""}" data-courts="2">10人 2面場</button>
+      </div>
+      <button class="btn sm" data-reset>重來</button>
+    </div>
+    <div class="tabs" style="position:static;margin:0 0 14px;padding:0"><div class="seg">
+      <button class="on">現在</button><button>賽程</button><button>排名</button>
+    </div></div>
+    <div class="live-status"><span id="roundNo">第 ${ri + 1} / ${rounds().length} 輪</span></div>
+    <div class="courts">${round.matches.map(courtCard).join("")}</div>
+    <div class="rest-line" id="restNow">🪑 這輪休息：${restSpans(round.rest)}</div>
+    <div class="card next-card" style="margin-top:14px" id="nextCard">${nextCardInner(rounds()[ri + 1])}</div>`;
+}
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const anim = (el, frames, opts) => el.animate(frames, { fill: "forwards", ...opts }).finished;
+
+// 換輪：下一輪的名字往上飛，取代場地裡原本的名字
+async function advance() {
+  const next = rounds()[ri + 1];
+  if (!next) return;
+  busy = true;
+
+  // 0. 記下「下一輪」每個名字現在的位置與字級
+  const sources = [];
+  next.matches.forEach((m, mi) => {
+    const row = document.querySelector(`[data-next="${mi}"]`);
+    const [ta, tb] = row.querySelectorAll(".t");
+    for (const [side, box] of [["a", ta], ["b", tb]]) {
+      box.querySelectorAll("span[data-n]").forEach((s, k) => {
+        sources.push({ name: s.dataset.n, court: mi, side, k, rect: s.getBoundingClientRect(), font: parseFloat(getComputedStyle(s).fontSize), el: s });
+      });
+    }
+  });
+
+  // 1. 場地裡舊的名字和比分往上淡出，比賽卡片恢復成未完成的樣子
+  const olds = [...document.querySelectorAll(".courts .names span, .courts .static-score, .courts .done-badge")];
+  await Promise.all(olds.map((el, i) => anim(el, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(-18px)" }], { duration: 220, delay: i * 15, easing: "ease-in" })));
+
+  // 2. 先把新名字放進場地（隱形），量出它們最後要落下的位置
+  done = next.matches.map(() => false);
+  document.querySelectorAll(".courts > .card").forEach((card, mi) => {
+    const m = next.matches[mi];
+    card.querySelector(".row").innerHTML = `<span class="court-label">第 ${mi + 1} 場地</span>`;
+    card.querySelector(".team.a .names").innerHTML = nameSpans(m.a);
+    card.querySelector(".team.b .names").innerHTML = nameSpans(m.b);
+    card.querySelectorAll(".static-score").forEach((s) => { s.textContent = "0"; s.style.opacity = "0"; });
+    const btn = card.querySelector("button");
+    btn.outerHTML = `<button class="btn primary block" style="margin-top:10px;opacity:0" data-finish="${mi}">這場打完了 ✓</button>`;
+  });
+  const targets = [...document.querySelectorAll(".courts .names span")];
+  targets.forEach((t) => (t.style.visibility = "hidden"));
+
+  // 3. 名字分身從「下一輪」飛到場地裡
+  const flights = sources.map((s, i) => {
+    const card = document.querySelector(`.courts > .card[data-court="${s.court}"]`);
+    const target = card.querySelectorAll(`.team.${s.side} .names span`)[s.k];
+    const tr = target.getBoundingClientRect();
+    const tf = parseFloat(getComputedStyle(target).fontSize);
+    const clone = document.createElement("div");
+    clone.className = "fly";
+    clone.textContent = s.name;
+    Object.assign(clone.style, { left: s.rect.left + "px", top: s.rect.top + "px", fontSize: s.font + "px", lineHeight: getComputedStyle(s.el).lineHeight });
+    document.body.appendChild(clone);
+    s.el.style.visibility = "hidden";
+    const dx = tr.left - s.rect.left, dy = tr.top - s.rect.top, sc = tf / s.font;
+    return clone
+      .animate(
+        [
+          { transform: "translate(0,0) scale(1) rotate(0deg)" },
+          { transform: `translate(${dx * 0.5}px, ${dy * 0.55 - 26}px) scale(${(1 + sc) / 2 + 0.12}) rotate(${i % 2 ? 6 : -6}deg)`, offset: 0.55 },
+          { transform: `translate(${dx}px, ${dy}px) scale(${sc}) rotate(0deg)` },
+        ],
+        { duration: 720, delay: i * 70, easing: "cubic-bezier(.45,.05,.3,1)", fill: "forwards" }
+      )
+      .finished.then(() => {
+        target.style.visibility = "visible";
+        target.animate([{ transform: "scale(1.18)" }, { transform: "scale(1)" }], { duration: 260, easing: "cubic-bezier(.3,1.6,.5,1)" });
+        clone.remove();
+      });
+  });
+
+  // 4. 這輪休息的人換掉
+  const restNow = document.getElementById("restNow");
+  anim(restNow, [{ opacity: 1 }, { opacity: 0 }], { duration: 200 }).then(() => {
+    restNow.innerHTML = `🪑 這輪休息：${restSpans(next.rest)}`;
+    anim(restNow, [{ opacity: 0, transform: "translateY(-8px)" }, { opacity: 1, transform: "none" }], { duration: 300, delay: 350 });
+  });
+
+  await Promise.all(flights);
+
+  // 5. 比分、按鈕出現；輪次 +1
+  ri++;
+  document.getElementById("roundNo").textContent = `第 ${ri + 1} / ${rounds().length} 輪`;
+  document.getElementById("roundNo").animate([{ transform: "scale(1.3)", color: "var(--ink)" }, { transform: "scale(1)" }], { duration: 400 });
+  document.querySelectorAll(".courts .static-score, .courts button").forEach((el) =>
+    anim(el, [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], { duration: 260 })
+  );
+
+  // 6. 「下一輪」換成再下一輪的名單，從下面浮上來
+  const nextCard = document.getElementById("nextCard");
+  nextCard.innerHTML = nextCardInner(rounds()[ri + 1]);
+  nextCard.querySelectorAll(".mini-match, .rest-line, p").forEach((el, i) =>
+    anim(el, [{ opacity: 0, transform: "translateY(14px)" }, { opacity: 1, transform: "none" }], { duration: 320, delay: 80 + i * 60, easing: "ease-out" })
+  );
+  await wait(400);
+  busy = false;
+}
+
+document.addEventListener("click", async (e) => {
+  if (busy) return;
+  const c = e.target.closest("[data-courts]");
+  if (c) { courts = Number(c.dataset.courts); ri = 0; done = rounds()[0].matches.map(() => false); return render(); }
+  if (e.target.closest("[data-reset]")) { ri = 0; done = rounds()[0].matches.map(() => false); return render(); }
+  const f = e.target.closest("[data-finish]");
+  if (!f) return;
+  const mi = Number(f.dataset.finish);
+  done[mi] = true;
+  if (done.every(Boolean)) {
+    // 整輪打完：先讓剛打完的那場蓋章，再換輪
+    const card = f.closest(".card");
+    card.querySelector(".row").insertAdjacentHTML("beforeend", `<span class="done-badge just">已完成</span>`);
+    card.querySelectorAll(".static-score").forEach((s, i) => (s.textContent = i ? 17 : 21));
+    f.disabled = true;
+    await wait(450);
+    advance();
+  } else {
+    const card = f.closest(".card");
+    card.outerHTML = courtCard(rounds()[ri].matches[mi], mi);
+  }
+});
+
+done = rounds()[0].matches.map(() => false);
+render();
+</script>
+</body>
+</html>
