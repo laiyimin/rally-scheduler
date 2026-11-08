@@ -165,7 +165,7 @@ function setTop(title, { back = false, menu = false } = {}) {
   $("#topTitle").textContent = title;
   $("#backBtn").hidden = !back;
   $("#menuBtn").hidden = !menu;
-  document.title = title === "球局小幫手" ? title : `${title} · 球局小幫手`;
+  document.title = title === "Pickle Party" ? title : `${title} · Pickle Party`;
 }
 
 function render() {
@@ -181,7 +181,7 @@ function render() {
 }
 
 function renderHome() {
-  setTop("球局小幫手");
+  setTop("Pickle Party");
   const list = [...state.events].sort((a, b) => b.createdAt - a.createdAt);
   app.innerHTML = `
     <button class="btn primary block" data-action="new" style="min-height:56px;font-size:17px">＋ 貼上接龍，開新球局</button>

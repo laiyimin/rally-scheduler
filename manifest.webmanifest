@@ -1,6 +1,6 @@
 {
-  "name": "球局小幫手",
-  "short_name": "球局小幫手",
+  "name": "Pickle Party",
+  "short_name": "Pickle Party",
   "description": "貼上 LINE 接龍，自動排出單打、雙打賽程與記分",
   "start_url": "./",
   "scope": "./",
