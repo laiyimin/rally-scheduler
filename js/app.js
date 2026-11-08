@@ -1,6 +1,7 @@
 import { parseRoster, defaultTitle } from "./parser.js";
 import { buildSchedule, roundsFromTime, standings } from "./scheduler.js";
 import { BALL, RALLY, ARROW, SHARE } from "./doodles.js";
+import { courtFlow, waitingFor, benched, isFinished } from "./flow.js";
 import { cloudEnabled, createCloud, joinCloud, fetchCloud, saveMatch, saveAll, watchCloud, shareUrl, parseShareHash } from "./cloud.js";
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -103,12 +104,9 @@ function remoteRender() {
     return;
   }
   flushWheels(); // 畫面上還沒存的分數先存起來（並送出），才不會被別人的更新蓋掉
-  // 別人打完、換到下一輪：一樣播放「下一輪名字飛上來」
+  // 別人打完、場地換人：一樣播放「下一輪名字飛上來」
   const ev = current();
-  if (state.tab === "live" && ev && !state.shared) {
-    const prev = lastRoundShown.get(ev.id);
-    if (prev !== undefined && prev !== -1 && currentRoundIndex(ev) === prev + 1) return advanceWithFlight(null);
-  }
+  if (state.tab === "live" && ev && !state.shared && courtsChanged(ev)) return advanceWithFlight(null);
   const y = window.scrollY;
   renderEvent();
   window.scrollTo(0, y);
@@ -140,10 +138,6 @@ function progress(ev) {
   const all = ev.rounds.flatMap((r) => r.matches);
   const done = all.filter((m) => m.done).length;
   return { done, total: all.length };
-}
-function currentRoundIndex(ev) {
-  const i = ev.rounds.findIndex((r) => r.matches.some((m) => !m.done));
-  return i; // -1 = 全部打完
 }
 
 function defaultCourts(n, mode) {
@@ -339,53 +333,82 @@ function renderEvent() {
     ${tab === "live" ? liveHtml(ev) : tab === "rounds" ? roundsHtml(ev) : rankHtml(ev)}`;
   initWheels();
   state.justDone = null;
-  // 記下目前顯示第幾輪；整場打完時跳出「全部打完了」
+  // 整場打完時跳出「全部打完了」
   if (tab === "live") {
-    const ri = currentRoundIndex(ev);
-    const prev = lastRoundShown.get(ev.id);
-    lastRoundShown.set(ev.id, ri);
-    if (prev !== undefined && prev !== -1 && ri === -1) playRoundEnter(-1, ev.rounds.length);
+    const all = courtFlow(ev).allDone;
+    const prev = lastAllDone.get(ev.id);
+    lastAllDone.set(ev.id, all);
+    if (prev === false && all) playRoundEnter(-1, ev.rounds.length);
   }
 }
 
 // ---------- 換輪動畫 ----------
-const lastRoundShown = new Map(); // 每個球局上次在「現在」分頁顯示的是第幾輪
+const lastAllDone = new Map(); // 每個球局上次顯示時是否已經全部打完
+
+// 畫面上各場地目前顯示的比賽（data-key），和最新資料推算的結果比較
+const shownCourtKeys = () => [...document.querySelectorAll(".courts > .card[data-court]")].map((el) => el.dataset.key || "");
+function courtsChanged(ev) {
+  const shown = shownCourtKeys();
+  if (!shown.length) return false;
+  const now = courtFlow(ev).courts.map((x) => (x ? x.key : ""));
+  return now.some((k, i) => k !== shown[i]);
+}
 const reduceMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const play = (el, frames, opts) => el.animate(frames, { fill: "forwards", ...opts }).finished;
 
-// 換輪：「下一輪」裡的名字往上飛，取代場地裡原本的名字
-// stampCard：自己按「這場打完了」的那張卡片（先蓋章）；別人同步過來的換輪沒有
+// 換場：「下一輪」裡的名字往上飛，取代場地裡原本的名字（只動有換人的場地）
+// stampCard：自己按「這場打完了」的那張卡片（先蓋章）；別人同步過來的沒有
 async function advanceWithFlight(stampCard) {
-  if (reduceMotion() || !$(".next-card .pn")) return renderEvent();
+  const ev = current();
+  if (reduceMotion() || !ev) return renderEvent();
   state.animating = true;
   try {
+    const shown = shownCourtKeys();
+    const flow = courtFlow(ev);
+    const changed = flow.courts.map((x, k) => ((x ? x.key : "") !== shown[k] ? k : -1)).filter((k) => k >= 0);
     // 1. 剛打完的那場先蓋章
     if (stampCard) {
       stampCard.querySelector(".row")?.insertAdjacentHTML("beforeend", `<span class="done-badge just">已完成</span>`);
       stampCard.querySelectorAll("button").forEach((b) => (b.disabled = true));
       await wait(450);
     }
-    // 2. 記下「下一輪」每個名字現在的位置與字級
-    const sources = [...document.querySelectorAll(".next-card .pn")].map((el) => {
-      const cs = getComputedStyle(el);
-      return { pid: el.dataset.pid, name: el.textContent, rect: el.getBoundingClientRect(), font: parseFloat(cs.fontSize), lh: cs.lineHeight, el };
-    });
-    // 3. 場地裡舊的名字、滾輪、按鈕往上淡出
-    const olds = [...document.querySelectorAll(".courts .pn, .courts .wheel-wrap, .courts .scorebox, .courts .done-badge, .courts .btn")];
+    // 2. 記下要上場的人在「下一輪」裡的位置
+    const sources = [];
+    for (const k of changed) {
+      const nk = flow.courts[k]?.key;
+      if (!nk) continue;
+      document.querySelectorAll(`.next-card .mini-match[data-key="${nk}"] .pn`).forEach((el) => {
+        const cs = getComputedStyle(el);
+        sources.push({ court: k, pid: el.dataset.pid, name: el.textContent, rect: el.getBoundingClientRect(), font: parseFloat(cs.fontSize), lh: cs.lineHeight });
+      });
+    }
+    // 3. 有換人的場地：舊的名字、滾輪、按鈕往上淡出
+    const sel = (k) => `.courts > .card[data-court="${k}"]`;
+    const olds = changed.flatMap((k) => [...document.querySelectorAll(`${sel(k)} .pn, ${sel(k)} .wheel-wrap, ${sel(k)} .scorebox, ${sel(k)} .done-badge, ${sel(k)} .btn, ${sel(k)} .wait-box`)]);
     await Promise.all(
       olds.map((el, i) => play(el, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(-18px)" }], { duration: 220, delay: i * 12, easing: "ease-in" }))
     );
-    // 4. 換成新的一輪（先把新名字和其他東西藏起來）
+    // 4. 畫出新的狀態（有換人的場地、休息名單、下一輪先藏起來）
     const y = window.scrollY;
     renderEvent();
     window.scrollTo(0, y);
-    const later = [...document.querySelectorAll(".courts .wheel-wrap, .courts .btn, #app > .rest-line, .next-card > :not(h2)")];
+    const later = [
+      ...changed.flatMap((k) => [...document.querySelectorAll(`${sel(k)} .wheel-wrap, ${sel(k)} .btn, ${sel(k)} .wait-box`)]),
+      ...document.querySelectorAll("#app > .rest-line, .next-card > :not(h2)"),
+    ];
     later.forEach((el) => (el.style.opacity = "0"));
-    // 5. 名字分身從原本的位置飛到場地裡
+    const flyingPids = new Set(sources.map((s) => `${s.court}:${s.pid}`));
+    // 沒有分身可以飛的名字（例如原本不在「下一輪」清單裡）直接淡入
+    changed.forEach((k) =>
+      document.querySelectorAll(`${sel(k)} .pn`).forEach((el) => {
+        if (!flyingPids.has(`${k}:${el.dataset.pid}`)) later.push(el), (el.style.opacity = "0");
+      })
+    );
+    // 5. 名字分身飛到場地裡
     const flights = sources.map((s, i) => {
-      const target = document.querySelector(`.courts .pn[data-pid="${CSS.escape(s.pid)}"]`);
+      const target = document.querySelector(`${sel(s.court)} .pn[data-pid="${CSS.escape(s.pid)}"]`);
       if (!target) return Promise.resolve();
       target.style.visibility = "hidden";
       const tr = target.getBoundingClientRect();
@@ -413,11 +436,11 @@ async function advanceWithFlight(stampCard) {
         });
     });
     await Promise.all(flights);
-    // 6. 滾輪、按鈕、休息名單、再下一輪的名單浮出來；輪次跳一下
+    // 6. 滾輪、按鈕、休息名單、下一輪浮出來；完成場數跳一下
     $(".live-status span")?.animate([{ transform: "scale(1.3)" }, { transform: "scale(1)" }], { duration: 400 });
     await Promise.all(
       later.map((el, i) =>
-        play(el, [{ opacity: 0, transform: "translateY(12px)" }, { opacity: 1, transform: "none" }], { duration: 300, delay: i * 50, easing: "ease-out" }).then(() => {
+        play(el, [{ opacity: 0, transform: "translateY(12px)" }, { opacity: 1, transform: "none" }], { duration: 300, delay: i * 40, easing: "ease-out" }).then(() => {
           el.style.opacity = "";
           el.getAnimations().forEach((a) => a.cancel());
         })
@@ -426,24 +449,6 @@ async function advanceWithFlight(stampCard) {
   } finally {
     state.animating = false;
   }
-}
-
-function playRoundEnter(ri, total) {
-  if (!reduceMotion()) document.querySelectorAll(".courts, .next-card, .rest-line, .empty").forEach((el) => el.classList.add("entering"));
-  let b = $("#roundBanner");
-  if (!b) {
-    b = document.createElement("div");
-    b.id = "roundBanner";
-    b.className = "round-banner";
-    b.setAttribute("role", "status");
-    document.body.appendChild(b);
-  }
-  b.innerHTML = ri === -1 ? `<span class="big-emoji">🏆</span><b>全部打完了！</b>` : `${BALL}<b>換下一輪！</b><span>第 ${ri + 1} / ${total} 輪</span>`;
-  b.classList.remove("show");
-  void b.offsetWidth; // 重新觸發動畫
-  b.classList.add("show");
-  clearTimeout(b._t);
-  b._t = setTimeout(() => b.classList.remove("show"), 1700);
 }
 
 const nameList = (ids, names) => ids.map((id) => `<span class="nm">${esc(names[id] || "?")}</span>`).join("、");
@@ -572,7 +577,8 @@ function initWheels() {
   });
 }
 
-function scoreControls(ev, r, mi, m, big) {
+// courtNo：在「現在」分頁時是實際的場地編號；在「賽程」分頁時為 null
+function scoreControls(ev, r, mi, m, courtNo) {
   const ro = readonly();
   const names = nameMap(ev);
   const winA = m.done && m.sa > m.sb;
@@ -587,7 +593,7 @@ function scoreControls(ev, r, mi, m, big) {
   };
   return `
     <div class="row between">
-      <span class="court-label">${big ? `第 ${m.court} 場地` : `第 ${r + 1} 輪・場地 ${m.court}`}</span>
+      <span class="court-label">${courtNo ? `第 ${courtNo} 場地 <span class="small">・第 ${r + 1} 輪</span>` : `第 ${r + 1} 輪・場地 ${m.court}`}</span>
       ${m.done ? `<span class="done-badge${state.justDone === `${r}-${mi}` ? " just" : ""}">已完成</span>` : ""}
     </div>
     <div class="match">${side("a")}<span class="vs">VS</span>${side("b")}</div>
@@ -601,9 +607,9 @@ function scoreControls(ev, r, mi, m, big) {
 }
 
 function liveHtml(ev) {
-  const ri = currentRoundIndex(ev);
+  const flow = courtFlow(ev);
   const names = nameMap(ev);
-  if (ri === -1) {
+  if (flow.allDone) {
     const top = standings(ev.players, ev.rounds).slice(0, 3);
     return `<div class="card empty">
       <div class="big">🏆</div>
@@ -612,31 +618,45 @@ function liveHtml(ev) {
       ${readonly() ? "" : `<button class="btn" data-action="copy-text">複製結果貼到 LINE</button>`}
     </div>`;
   }
-  const round = ev.rounds[ri];
-  const next = ev.rounds[ri + 1];
+  const activeIds = ev.players.filter((p) => !p.left).map((p) => p.id);
+  const wait = waitingFor(ev, flow);
+  const courtCard = (x, k) => {
+    if (x) {
+      const m = ev.rounds[x.ri].matches[x.mi];
+      return `<div class="card" data-court="${k}" data-key="${x.key}">${scoreControls(ev, x.ri, x.mi, m, k + 1)}</div>`;
+    }
+    return `<div class="card court-wait" data-court="${k}" data-key="">
+      <div class="row between"><span class="court-label">第 ${k + 1} 場地</span></div>
+      <div class="wait-box">${BALL}${
+        flow.pending.length
+          ? `<b>等待中</b><span>下一場要等 ${nameList(wait, names) || "其他場地"} 打完</span>`
+          : `<b>這面場地打完了</b><span>等其他場地結束</span>`
+      }</div>
+    </div>`;
+  };
+  // 「下一輪」：接下來要上場的比賽（照順序，最多和場地數一樣多）
+  const upcoming = flow.pending.slice(0, flow.nCourts);
+  const upcomingIds = new Set(upcoming.flatMap((u) => [...ev.rounds[u.ri].matches[u.mi].a, ...ev.rounds[u.ri].matches[u.mi].b]));
+  const nextRest = activeIds.filter((id) => !upcomingIds.has(id));
+  const bench = benched(ev, flow, activeIds);
   return `
     <div class="live-status">
-      <span>第 ${ri + 1} / ${ev.rounds.length} 輪</span>
+      <span>已完成 ${flow.doneCount} / ${flow.total} 場</span>
       ${ev.cloud ? `<span>・🔗 即時同步中</span>${ev.cloud.key ? `<button class="copy-link" data-action="copy-edit-link">${SHARE}複製賽程連結</button>` : ""}` : ""}
     </div>
-    <div class="courts">${round.matches.map((m, mi) => `<div class="card">${scoreControls(ev, ri, mi, m, true)}</div>`).join("")}</div>
+    <div class="courts">${flow.courts.map(courtCard).join("")}</div>
+    ${bench.length ? `<div class="rest-line">🪑 場邊休息：${nameList(bench, names)}</div>` : ""}
     ${
-      round.rest.length || round.absent?.length
-        ? `<div class="rest-line">🪑 這輪休息：${nameList(round.rest, names) || "無"}${
-            round.absent?.length ? `<br>還沒到：${nameList(round.absent, names)}` : ""
-          }</div>`
-        : ""
-    }
-    ${
-      next
+      upcoming.length
         ? `<div class="card next-card" style="margin-top:14px">
             <h2>下一輪</h2>
-            ${next.matches
-              .map(
-                (m) => `<div class="mini-match"><span class="ct">場${m.court}</span><span class="t r">${teamNames(m.a, names)}</span><span class="s muted">vs</span><span class="t">${teamNames(m.b, names)}</span></div>`
-              )
+            ${upcoming
+              .map((u) => {
+                const m = ev.rounds[u.ri].matches[u.mi];
+                return `<div class="mini-match" data-key="${u.key}"><span class="ct">場${m.court}</span><span class="t r">${teamNames(m.a, names)}</span><span class="s muted">vs</span><span class="t">${teamNames(m.b, names)}</span></div>`;
+              })
               .join("")}
-            ${next.rest.length ? `<div class="rest-line">休息：${nameList(next.rest, names)}</div>` : ""}
+            ${nextRest.length ? `<div class="rest-line">休息：${nameList(nextRest, names)}</div>` : ""}
           </div>`
         : ""
     }`;
@@ -644,19 +664,21 @@ function liveHtml(ev) {
 
 function roundsHtml(ev) {
   const names = nameMap(ev);
-  const cur = currentRoundIndex(ev);
+  const flow = courtFlow(ev);
+  const playing = new Map(flow.courts.filter(Boolean).map((x, i) => [x.key, flow.courtOf.get(x.key)]));
+  const curRounds = new Set(flow.courts.filter(Boolean).map((x) => x.ri));
   return `<div class="card round-list">
     ${ev.rounds
       .map(
-        (round, r) => `<div class="round ${r === cur ? "current" : ""}">
-          <div class="row between"><strong>第 ${r + 1} 輪</strong>${r === cur ? `<span class="done-badge">進行中</span>` : ""}</div>
+        (round, r) => `<div class="round ${curRounds.has(r) ? "current" : ""}">
+          <div class="row between"><strong>第 ${r + 1} 輪</strong>${curRounds.has(r) ? `<span class="done-badge">進行中</span>` : ""}</div>
           ${round.matches
             .map((m, mi) => {
               if (state.editing && state.editing.r === r && state.editing.m === mi)
-                return `<div style="margin:8px 0">${scoreControls(ev, r, mi, m, false)}
+                return `<div style="margin:8px 0">${scoreControls(ev, r, mi, m, null)}
                   <button class="btn sm block" style="margin-top:6px" data-action="collapse">收合</button></div>`;
               return `<button class="mini-match" data-action="expand" data-r="${r}" data-m="${mi}">
-                <span class="ct">場${m.court}</span>
+                <span class="ct">${playing.has(`${r}-${mi}`) ? `<b>場${playing.get(`${r}-${mi}`)}</b><br>打中` : `場${flow.courtOf.get(`${r}-${mi}`) || m.court}`}</span>
                 <span class="t r">${teamNames(m.a, names)}</span>
                 <span class="s">${m.done || m.sa || m.sb ? `${m.sa} : ${m.sb}` : `<span class="muted">vs</span>`}</span>
                 <span class="t">${teamNames(m.b, names)}</span>
@@ -761,8 +783,9 @@ function playersSheet() {
 // 有開打（打完或已有比分）的輪次要保留
 function keepRounds(ev) {
   let last = -1;
+  const onCourt = new Set(courtFlow(ev).courts.filter(Boolean).map((x) => x.ri));
   ev.rounds.forEach((r, i) => {
-    if (r.matches.some((m) => m.done || m.sa || m.sb)) last = i;
+    if (onCourt.has(i) || r.matches.some((m) => isFinished(m) || m.sa || m.sb)) last = i;
   });
   return ev.rounds.slice(0, last + 1);
 }
@@ -1045,11 +1068,11 @@ async function onAction(el) {
       const m = ev.rounds[el.dataset.r].matches[el.dataset.m];
       if (m.sa === m.sb && !confirm(m.sa === 0 ? "還沒記分，確定這場打完了？" : "比分相同，確定這場打完了？")) return;
       m.done = true;
+      if (m.doneAt == null) m.doneAt = Date.now(); // 打完的時間：用來推算每面場地接下來打哪場
       saveEvents();
       pushMatch(ev, el.dataset.r, el.dataset.m);
-      const round = ev.rounds[el.dataset.r];
-      if (state.tab === "live" && round.matches.every((x) => x.done)) {
-        await advanceWithFlight(el.closest(".card")); // 整輪打完：下一輪的名字飛上來
+      if (state.tab === "live") {
+        await advanceWithFlight(el.closest(".card")); // 這面場地：下一輪的名字飛上來遞補
         break;
       }
       state.justDone = `${el.dataset.r}-${el.dataset.m}`; // 這場蓋上「已完成」章

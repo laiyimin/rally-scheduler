@@ -66,7 +66,7 @@ export function toCloud(ev) {
       left: !!p.left,
     })),
     rounds: ev.rounds.map((r) => ({
-      matches: r.matches.map((m) => ({ court: m.court, a: m.a, b: m.b, sa: m.sa || 0, sb: m.sb || 0, done: !!m.done })),
+      matches: r.matches.map((m) => ({ court: m.court, a: m.a, b: m.b, sa: m.sa || 0, sb: m.sb || 0, done: !!m.done, ...(m.doneAt != null ? { doneAt: m.doneAt } : {}) })),
       rest: r.rest || [],
       absent: r.absent || [],
     })),
@@ -94,7 +94,7 @@ export function fromCloud(data) {
       ...(p.left ? { left: true } : {}),
     })),
     rounds: arr(data.rounds).map((r) => ({
-      matches: arr(r.matches).map((m) => ({ court: m.court, a: arr(m.a), b: arr(m.b), sa: m.sa || 0, sb: m.sb || 0, done: !!m.done })),
+      matches: arr(r.matches).map((m) => ({ court: m.court, a: arr(m.a), b: arr(m.b), sa: m.sa || 0, sb: m.sb || 0, done: !!m.done, ...(m.doneAt != null ? { doneAt: m.doneAt } : {}) })),
       rest: arr(r.rest),
       absent: arr(r.absent),
     })),
@@ -144,6 +144,7 @@ export function saveMatch(cloud, r, mi, m) {
       [`rounds/${r}/matches/${mi}/sa`]: m.sa || 0,
       [`rounds/${r}/matches/${mi}/sb`]: m.sb || 0,
       [`rounds/${r}/matches/${mi}/done`]: !!m.done,
+      [`rounds/${r}/matches/${mi}/doneAt`]: m.doneAt ?? null, // 打完的時間：各手機用它推算哪場上哪面場地
       "meta/updatedAt": Date.now(),
     })
   );

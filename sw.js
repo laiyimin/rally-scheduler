@@ -1,5 +1,5 @@
 // 離線快取：先回快取、背景更新（stale-while-revalidate）
-const CACHE = "rallymate-v11";
+const CACHE = "rallymate-v12";
 const SHELL = [
   "./",
   "index.html",
@@ -9,6 +9,7 @@ const SHELL = [
   "js/scheduler.js",
   "js/cloud.js",
   "js/doodles.js",
+  "js/flow.js",
   "js/firebase-config.js",
   "manifest.webmanifest",
   "icon.svg",
