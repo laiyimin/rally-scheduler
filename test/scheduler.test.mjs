@@ -40,6 +40,22 @@ test("6 人雙打 1 面場 10 輪：上場數差距 ≤ 1、不連休兩輪以�
   }
 });
 
+test("不會連打太多場：6 人雙打 1 面場最多連打 2 場，7 人以上也是", () => {
+  for (const n of [6, 7, 9]) {
+    for (let seed = 1; seed <= 5; seed++) {
+      const rounds = buildSchedule({ players: mk(n), mode: "doubles", courts: 1, rounds: 12, seed });
+      const streak = {};
+      for (const r of rounds) {
+        const on = new Set(r.matches.flatMap((m) => [...m.a, ...m.b]));
+        for (const p of mk(n)) {
+          streak[p.id] = on.has(p.id) ? (streak[p.id] || 0) + 1 : 0;
+          assert.ok(streak[p.id] <= 2, `${n} 人、seed ${seed}：${p.id} 連打 ${streak[p.id]} 場`);
+        }
+      }
+    }
+  }
+});
+
 test("10 人雙打 2 面場：每輪 2 場、2 人休息", () => {
   const rounds = buildSchedule({ players: mk(10), mode: "doubles", courts: 2, rounds: 8, seed: 2 });
   check(rounds, 4);

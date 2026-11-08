@@ -1,5 +1,5 @@
 // 排賽程：單打 / 雙打、多面場地、晚到球員
-// 目標（依重要性）：每人上場數平均 > 不連續休息 > 搭檔不重複 > 對手不重複
+// 目標（依重要性）：每人上場數平均 > 不連續上場太多場 > 不連續休息 > 搭檔不重複 > 對手不重複
 // 做法：每輪貪婪挑人 + 隨機搜尋分組，整份賽程跑多次取總成本最低者
 
 function shuffle(arr, rnd) {
@@ -24,10 +24,11 @@ function mulberry32(seed) {
 const pairKey = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 
 function emptyStats(ids) {
-  const s = { games: {}, restStreak: {}, lastPlayed: {}, partner: {}, opponent: {} };
+  const s = { games: {}, restStreak: {}, playStreak: {}, lastPlayed: {}, partner: {}, opponent: {} };
   for (const id of ids) {
     s.games[id] = 0;
     s.restStreak[id] = 0;
+    s.playStreak[id] = 0;
     s.lastPlayed[id] = -1;
   }
   return s;
@@ -37,6 +38,7 @@ function cloneStats(s) {
   return {
     games: { ...s.games },
     restStreak: { ...s.restStreak },
+    playStreak: { ...s.playStreak },
     lastPlayed: { ...s.lastPlayed },
     partner: { ...s.partner },
     opponent: { ...s.opponent },
@@ -68,6 +70,7 @@ function applyRound(s, round, r, ids) {
       s.lastPlayed[id] = -1;
     }
     s.restStreak[id] = playing.has(id) ? 0 : (s.restStreak[id] || 0) + 1;
+    s.playStreak[id] = playing.has(id) ? (s.playStreak[id] || 0) + 1 : 0;
   }
 }
 
@@ -94,17 +97,32 @@ export function idealRest(available, need) {
 const SOFT_REST = 30;
 const HARD_REST = 200;
 
+// 最多連續上場幾輪：目標是「不連打 3 場」（連打 2 場可以接受，
+// 若硬要每打一場就休一場，會變成固定兩組人輪流，搭檔一直重複）。
+// 人太少時做不到：每個人在每 (S+1) 輪內至少要休息一次，而每輪只有
+// (人數 − 上場人數) 個休息名額 → 最低只能到 S = ⌈人數 / 休息名額⌉ − 1。
+// 沒有人休息（例如 8 人 2 面場雙打）時一定會一直連打，回傳 Infinity。
+export function idealPlayStreak(available, need) {
+  const restSlots = available - need;
+  if (restSlots <= 0) return Infinity;
+  return Math.max(2, Math.ceil(available / restSlots) - 1);
+}
+const HARD_PLAY = 200;
+
 function planRound(available, s, matchCount, size, rnd) {
   const need = matchCount * size;
   const ideal = idealRest(available.length, need);
   const allow = ideal + 1;
+  const maxPlay = idealPlayStreak(available.length, need);
   // 上場數少的一定先上；同一級距內的人選用隨機嘗試，
   // 讓「誰上場」和「怎麼分組」一起評估，避免同樣的對戰一直循環
   // 偶爾讓「多打一場」的人往前擠一點（有罰分），避免賽程卡進固定週期
   const order = (list, loose) => {
     const key = Object.fromEntries(list.map((id) => [id, s.games[id] - (loose && rnd() < 0.35 ? 1 : 0)]));
+    // 已經連打到上限的人排到後面（這輪休息）
+    const tired = (id) => (s.playStreak[id] >= maxPlay ? 1 : 0);
     return shuffle(list, rnd).sort(
-      (x, y) => key[x] - key[y] || (s.restStreak[y] >= allow) - (s.restStreak[x] >= allow)
+      (x, y) => tired(x) - tired(y) || key[x] - key[y] || (s.restStreak[y] >= allow) - (s.restStreak[x] >= allow)
     );
   };
   const minGames = Math.min(...available.map((id) => s.games[id]));
@@ -120,7 +138,10 @@ function planRound(available, s, matchCount, size, rnd) {
     const groups = [];
     for (let i = 0; i < matchCount; i++) groups.push(chosen.slice(i * size, (i + 1) * size));
     let c = arrangementCost(groups, s, size);
-    for (const id of chosen) c += 15 * (s.games[id] - minGames) ** 2; // 讓上場多的人再上，要付代價
+    for (const id of chosen) {
+      c += 15 * (s.games[id] - minGames) ** 2; // 讓上場多的人再上，要付代價
+      if (s.playStreak[id] + 1 > maxPlay) c += HARD_PLAY; // 連打超過上限
+    }
     for (const id of rest) {
       const streak = s.restStreak[id] + 1;
       c += 2 * streak; // 連續休息越久越該上場（輕微偏好）
@@ -177,6 +198,8 @@ export function buildSchedule({ players, mode, courts, rounds, keep = [], seed =
       const round = { matches: plan.matches, rest: plan.rest, absent: notYet };
       applyRound(s, round, r, available);
       const ideal = idealRest(available.length, matchCount * size);
+      const maxPlay = idealPlayStreak(available.length, matchCount * size);
+      for (const id of available) if (s.playStreak[id] > maxPlay) overRest += HARD_PLAY;
       for (const id of plan.rest) {
         if (s.restStreak[id] > ideal) overRest += SOFT_REST;
         if (s.restStreak[id] > ideal + 1) overRest += HARD_REST;

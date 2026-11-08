@@ -210,9 +210,8 @@ function renderPaste() {
       ${RALLY}
       <h2><span class="hl">複製 LINE 的報名接龍</span>，貼入下面的欄位</h2>
       <textarea id="rosterText" placeholder="貼入所有接龍訊息，我會幫你抓出人名&#10;&#10;📆11/5（四）&#10;⏰15:30-17:30&#10;1.倫&#10;2.小甄&#10;3.K">${esc(d.text)}</textarea>
-      <div class="row">
-        <button class="btn" data-action="paste-clip" style="flex:1">📋 從剪貼簿貼上</button>
-        <button class="btn" data-action="clear-text">清除</button>
+      <div class="row" style="justify-content:flex-end">
+        <button class="btn sm" data-action="clear-text">清除</button>
       </div>
     </div>
     <div class="card stack" id="parsedCard" ${parsed || d.text ? "" : "hidden"}>
@@ -284,13 +283,14 @@ function renderSetup() {
         <label>輪數<span class="hint">${d.roundsTouched ? "已手動調整" : "依時間自動計算"}</span></label>
         <div class="stepper"><button data-action="step" data-k="rounds" data-d="-1" aria-label="減少輪數">−</button><output>${c.rounds}</output><button data-action="step" data-k="rounds" data-d="1" aria-label="增加輪數">＋</button></div>
       </div>
+      ${c.perRound > 0 ? `<div class="per-person">${BALL}每人約打 <strong>${Number.isInteger(c.each) ? c.each : c.each.toFixed(1)}</strong> 場</div>` : ""}
     </div>
     ${
       tooFew
         ? `<div class="banner">人數不夠：${d.mode === "doubles" ? "雙打至少 4 人" : "單打至少 2 人"}，目前 ${c.active.length} 人</div>`
         : `<div class="summary">
             ${c.active.length} 人・每輪 ${c.perRound} 場${c.active.length - c.perRound * c.size > 0 ? `、${c.active.length - c.perRound * c.size} 人輪休` : ""}<br>
-            共 ${c.rounds} 輪 ${c.rounds * c.perRound} 場，每人約打 <strong>${c.each.toFixed(1)}</strong> 場
+            共 ${c.rounds} 輪 ${c.rounds * c.perRound} 場
             ${d.courts > c.perRound ? `<br><span class="small">（人數只夠開 ${c.perRound} 面場）</span>` : ""}
             ${late.length ? `<br><span class="small">晚到：${late.map((p) => `${esc(p.name)} ${esc(p.arrive)}`).join("、")}，到場前不會排到</span>` : ""}
           </div>`
@@ -842,17 +842,6 @@ async function onAction(el) {
       state.view = "paste";
       render();
       $("#rosterText")?.focus();
-      break;
-    case "paste-clip":
-      try {
-        const t = await navigator.clipboard.readText();
-        if (!t) return toast("剪貼簿是空的");
-        $("#rosterText").value = t;
-        applyParse(t);
-        refreshParsed();
-      } catch {
-        toast("瀏覽器不允許讀取剪貼簿，請長按輸入框貼上");
-      }
       break;
     case "clear-text":
       state.draft = newDraft();

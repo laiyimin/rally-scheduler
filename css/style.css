@@ -369,3 +369,14 @@ td.name { text-align: left; font-weight: 700; font-size: 24px; }
 @media (prefers-reduced-motion: reduce) {
   .wheel-hint .hand, .doodle-rally .doodle-ball, .bounce .doodle-ball { animation: none; }
 }
+
+/* 輪數下面：每人約打幾場 */
+.per-person {
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  margin: -2px 0 6px; font-size: 17px; font-weight: 700;
+}
+.per-person strong {
+  font-size: 22px; padding: 0 4px;
+  background: linear-gradient(transparent 55%, var(--hl) 55%, var(--hl) 92%, transparent 92%);
+}
+.per-person .doodle-ball { width: 22px; height: 22px; }
