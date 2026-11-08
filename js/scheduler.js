@@ -171,11 +171,12 @@ function planRound(available, s, matchCount, size, rnd) {
  * @param {{id:string, fromRound?:number}[]} opt.players  fromRound：第幾輪（0 起算）之後才到
  * @param {"doubles"|"singles"} opt.mode
  * @param {number} opt.courts
- * @param {number} opt.rounds  要排幾輪
+ * @param {number} opt.rounds  要排幾輪（有給 games 時是上限）
+ * @param {number} [opt.games]  總場次：排滿這麼多場就停，最後一輪可能只開部分場地
  * @param {object[]} [opt.keep]  已打過、要保留的輪次
  * @param {number} [opt.seed]
  */
-export function buildSchedule({ players, mode, courts, rounds, keep = [], seed = Date.now(), trials = 40 }) {
+export function buildSchedule({ players, mode, courts, rounds, games, keep = [], seed = Date.now(), trials = 40 }) {
   const size = mode === "singles" ? 2 : 4;
   const ids = players.map((p) => p.id);
   const fromRound = Object.fromEntries(players.map((p) => [p.id, p.fromRound || 0]));
@@ -189,10 +190,14 @@ export function buildSchedule({ players, mode, courts, rounds, keep = [], seed =
     const out = [];
     let score = 0;
     let overRest = 0;
-    for (let r = keep.length; r < keep.length + rounds; r++) {
+    let placed = 0;
+    const maxRounds = games ? Math.max(rounds || 0, games) : rounds;
+    for (let r = keep.length; r < keep.length + maxRounds; r++) {
       const available = ids.filter((id) => fromRound[id] <= r);
-      const matchCount = Math.min(courts, Math.floor(available.length / size));
-      if (matchCount === 0) break;
+      const left = games ? games - placed : Infinity;
+      const matchCount = Math.min(courts, Math.floor(available.length / size), left);
+      if (matchCount <= 0) break;
+      placed += matchCount;
       const plan = planRound(available, s, matchCount, size, rnd);
       const notYet = ids.filter((id) => fromRound[id] > r);
       const round = { matches: plan.matches, rest: plan.rest, absent: notYet };

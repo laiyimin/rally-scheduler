@@ -121,3 +121,18 @@ test("排名：勝場 > 淨勝分", () => {
   // p0、p3 都是 1 勝；p0 淨勝 +9、p3 淨勝 -9 → p0 在前；p2 0 勝墊底
   assert.deepEqual(s.map((r) => r.id), ["p1", "p0", "p3", "p2"]);
 });
+
+test("指定總場次：10 人雙打 2 面場排 15 場 → 7 輪 2 場 + 最後 1 輪 1 場", () => {
+  const rounds = buildSchedule({ players: mk(10), mode: "doubles", courts: 2, rounds: 8, games: 15, seed: 9 });
+  check(rounds, 4);
+  assert.equal(rounds.flatMap((r) => r.matches).length, 15);
+  assert.equal(rounds.length, 8);
+  assert.equal(rounds.at(-1).matches.length, 1);
+  assert.equal(rounds.at(-1).rest.length, 6);
+});
+
+test("指定總場次：6 人雙打 1 面場排 9 場，每人上場 6 場", () => {
+  const rounds = buildSchedule({ players: mk(6), mode: "doubles", courts: 1, rounds: 9, games: 9, seed: 10 });
+  assert.equal(rounds.length, 9);
+  assert.deepEqual(Object.values(games(rounds)), [6, 6, 6, 6, 6, 6]);
+});

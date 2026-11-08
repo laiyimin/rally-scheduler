@@ -380,3 +380,56 @@ td.name { text-align: left; font-weight: 700; font-size: 24px; }
   background: linear-gradient(transparent 55%, var(--hl) 55%, var(--hl) 92%, transparent 92%);
 }
 .per-person .doodle-ball { width: 22px; height: 22px; }
+
+/* ---------- 排法規則 ---------- */
+.rules { margin-top: 14px; border: 2px dashed var(--line); border-radius: var(--wob2); padding: 10px 14px 6px; }
+.rules-title { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.rules-title .doodle-ball { width: 20px; height: 20px; }
+.rules ul { margin: 6px 0 4px; padding-left: 22px; line-height: 1.7; }
+.rules b { background: linear-gradient(transparent 60%, var(--hl) 60%, var(--hl) 92%, transparent 92%); }
+
+/* ---------- 「現在」分頁上方：輪次、同步狀態、複製連結 ---------- */
+.live-status { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0 0 10px; font-size: 14px; color: var(--muted); }
+.copy-link {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+  border: 2px solid var(--ink); border-radius: var(--wob-pill); background: var(--card); color: var(--ink);
+  padding: 3px 12px 3px 6px; font-size: 14px; font-weight: 700; box-shadow: 2px 2px 0 var(--ink);
+}
+.copy-link:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--ink); }
+.doodle-share { width: 20px; height: 20px; }
+
+/* ---------- 換輪動畫 ---------- */
+/* 舊的比賽：往左甩出去 */
+.leaving > .card, .next-card.leaving, .rest-line.leaving { animation: card-out 0.42s cubic-bezier(.5, 0, .9, .4) forwards; }
+.leaving > .card:nth-child(2) { animation-delay: 0.05s; }
+@keyframes card-out { to { transform: translateX(-115%) rotate(-8deg); opacity: 0; } }
+/* 新的比賽：從右邊彈進來 */
+.entering > .card, .next-card.entering, .rest-line.entering, .empty.entering { animation: card-in 0.55s cubic-bezier(.2, 1.35, .4, 1) both; }
+.entering > .card:nth-child(2) { animation-delay: 0.08s; }
+.rest-line.entering { animation-delay: 0.14s; }
+.next-card.entering { animation-delay: 0.2s; }
+@keyframes card-in { from { transform: translateX(110%) rotate(6deg); opacity: 0; } to { transform: none; opacity: 1; } }
+/* 單場打完：蓋章 */
+.done-badge.just { animation: stamp 0.4s cubic-bezier(.3, 1.6, .5, 1) both; }
+@keyframes stamp { from { transform: scale(2.6) rotate(-18deg); opacity: 0; } to { transform: rotate(-6deg); opacity: 1; } }
+/* 畫面中間的提示 */
+.round-banner {
+  position: fixed; left: 50%; top: 38%; z-index: 45; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: var(--card); color: var(--ink); border: 3px solid var(--ink); border-radius: var(--wob);
+  box-shadow: 5px 6px 0 var(--ink); padding: 14px 26px; font-size: 16px;
+  opacity: 0; transform: translate(-50%, -50%) scale(0.6) rotate(-4deg);
+}
+.round-banner b { font-size: 26px; }
+.round-banner .doodle-ball { width: 44px; height: 44px; }
+.round-banner .big-emoji { font-size: 40px; line-height: 1; }
+.round-banner.show { animation: banner-pop 1.7s cubic-bezier(.3, 1.5, .5, 1) forwards; }
+.round-banner.show .doodle-ball { animation: ball-bounce 0.6s cubic-bezier(.5, 0, .5, 1) 2; }
+@keyframes banner-pop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.6) rotate(-4deg); }
+  18%, 78% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(-2deg); }
+  100% { opacity: 0; transform: translate(-50%, -60%) scale(0.9) rotate(-2deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .round-banner.show { animation: none; opacity: 1; transform: translate(-50%, -50%); }
+}

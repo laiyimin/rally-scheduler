@@ -28,6 +28,14 @@ export const RALLY = `<span class="doodle-rally" aria-hidden="true">${PADDLE}${B
     <path d="M3 18c8-1 15-4 21-9M6 22c7-.4 13-2.4 19-6M2 12c6-1.5 11-4 15-8" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linecap="round" stroke-dasharray="1 5" opacity=".6"/>
   </svg></span>`;
 
+// 分享圖示：三個圓點用手繪線連起來
+export const SHARE = `<svg class="doodle doodle-share" viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M8.2 10.8l7.4-4.1M8.4 13.4l7.2 4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="18" cy="5.6" r="3" fill="var(--ball)" stroke="currentColor" stroke-width="1.9"/>
+  <circle cx="6" cy="12" r="3.1" fill="var(--ball)" stroke="currentColor" stroke-width="1.9"/>
+  <circle cx="18" cy="18.6" r="3" fill="var(--ball)" stroke="currentColor" stroke-width="1.9"/>
+</svg>`;
+
 // 手繪箭頭：橘色蠟筆塗鴉 + 外圍虛線
 export const ARROW = `<svg class="doodle doodle-arrow" viewBox="0 0 76 46" aria-hidden="true">
   <defs><clipPath id="arrow-clip"><path d="M5 15.5c11-1.6 23-1.4 34.5-2.2L38.2 4.6c10.6 5.2 21 11.2 31.6 18.2-10.2 6.6-20.4 12.8-31 18.6l1.2-9.2c-11.2.6-23.2.8-34.6-.4-1.6-5.2-1.6-11 .6-16.3z"/></clipPath></defs>
